@@ -313,8 +313,10 @@ async function generatePlan() {
       body: JSON.stringify({ model:"claude-sonnet-4-5", max_tokens:4000,
         messages:[{role:"user",content:buildPrompt()}] })
     });
-    const data = await resp.json();
-    if(!resp.ok) throw new Error(data.error?.message||"Erreur API");
+    let data;
+    const rawResp = await resp.text();
+    try { data = JSON.parse(rawResp); } catch(e) { throw new Error("Réponse non-JSON (statut "+resp.status+"): " + rawResp.slice(0,300)); }
+    if(!resp.ok) throw new Error("HTTP "+resp.status+" — " + (data.error?.message || JSON.stringify(data).slice(0,200)));
     let rawText = "";
     try { rawText = data.content.map(i=>i.text||"").join(""); }
     catch(e2) { throw new Error("Réponse API inattendue: " + JSON.stringify(data).slice(0,300)); }
