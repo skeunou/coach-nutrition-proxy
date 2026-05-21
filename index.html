@@ -29,6 +29,7 @@
   .tbtn.on-o{border-color:var(--acc2);background:rgba(255,107,53,.08);color:var(--acc2);font-weight:600}
   .tbtn.on-g{border-color:var(--grn);background:rgba(74,222,128,.08);color:var(--grn);font-weight:600}
   .tbtn.on-w{border-color:var(--warn);background:rgba(255,149,0,.08);color:var(--warn);font-weight:600}
+  .tbtn.on-b{border-color:#60a5fa;background:rgba(96,165,250,.08);color:#60a5fa;font-weight:600}
   .dgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
   .dbtn{padding:10px 4px;border:1.5px solid var(--bdr);background:var(--surf2);color:var(--mut);border-radius:6px;font-family:'Bebas Neue',sans-serif;font-size:16px;cursor:pointer;text-align:center}
   .dbtn.on{border-color:var(--acc);background:rgba(232,255,71,.08);color:var(--acc)}
@@ -122,6 +123,7 @@
           <button class="tbtn" data-v="recup">Récup post-course</button>
           <button class="tbtn" data-v="normale">Semaine normale</button>
           <button class="tbtn" data-v="affutage">Affûtage J-7</button>
+          <button class="tbtn" data-v="deficit">Déficit calorique</button>
         </div>
       </div>
       <div class="fg">
@@ -206,7 +208,7 @@ document.querySelectorAll(".tab-btn").forEach(b=>b.addEventListener("click",()=>
 document.querySelectorAll("#ctx-g .tbtn").forEach(b=>b.addEventListener("click",()=>{
   cfg.ctx=b.dataset.v;
   document.querySelectorAll("#ctx-g .tbtn").forEach(x=>x.className="tbtn");
-  const cls={charge:"tbtn on-o",recup:"tbtn on-g",normale:"tbtn on",affutage:"tbtn on-w"};
+  const cls={charge:"tbtn on-o",recup:"tbtn on-g",normale:"tbtn on",affutage:"tbtn on-w",deficit:"tbtn on-b"};
   b.className=cls[cfg.ctx];
 }));
 document.querySelectorAll("#day-g .dbtn").forEach(b=>b.addEventListener("click",()=>{
