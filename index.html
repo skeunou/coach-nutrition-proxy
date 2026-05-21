@@ -145,8 +145,8 @@
         </div>
       </div>
       <div class="fg">
-        <label class="flbl">Envies / Exclusions</label>
-        <textarea id="envies" placeholder="Ex: pas de riz, j'ai du poulet à finir..."></textarea>
+        <label class="flbl">Ingrédients à utiliser / Exclusions</label>
+        <textarea id="envies" placeholder="Ex: j'ai du poulet à finir (1 recette max), pas de riz cette semaine..."></textarea>
       </div>
       <div class="fg">
         <label class="flbl">Entraînements prévus</label>
@@ -227,7 +227,7 @@ function buildPrompt(){
   const jours=cfg.days;
   // Exemple pour 1 jour — le modèle duplique le pattern
   const ex='{"dayLabel":"Jour 1","trainingNote":null,"lunch":{"name":"Nom","description":"1 phrase","tags":["post-effort"],"prepTime":20,"macros":{"proteines":35,"glucides":60,"lipides":12},"microNote":"note micro","steps":["1","2","3"]},"dinner":{"name":"Nom","description":"1 phrase","tags":["anti-inflammatoire"],"prepTime":20,"macros":{"proteines":40,"glucides":45,"lipides":15},"microNote":"note","steps":["1","2","3"]}}';
-  return `Coach neuro-nutrition trail. Plan ${jours} jours pour ${FMT[cfg.fmt]}. ${CTX[cfg.ctx]}.${envies?" Contraintes: "+envies+".":""}${trainings?" Training: "+trainings+".":""}${recent.length?" Ne pas répéter: "+recent.slice(0,6).join(", ")+".":""}
+  return `Coach neuro-nutrition trail. Plan ${jours} jours pour ${FMT[cfg.fmt]}. ${CTX[cfg.ctx]}.${envies?" Contraintes/ingrédients à intégrer (1 seule recette max par ingrédient à finir, pas systématiquement): "+envies+".":""}${trainings?" Training: "+trainings+".":""}${recent.length?" Ne pas répéter: "+recent.slice(0,6).join(", ")+".":""}
 Réponds UNIQUEMENT en JSON valide sans markdown:
 {"context":"label","days":[${ex}],"shoppingList":{"Protéines":["item"],"Féculents":["item"],"Légumes":["item"],"Fruits":["item"],"Graisses & oléagineux":["item"],"Condiments & divers":["item"]},"weekSummary":"1 phrase."}
 Génère exactement ${jours} jours. Tags: post-effort, pre-effort, charge-glucidique, récup-protéique, anti-inflammatoire, léger.`;
