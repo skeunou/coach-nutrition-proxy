@@ -240,7 +240,7 @@ async function gen(){
   try{
     const resp=await fetch("/.netlify/functions/generate",{
       method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({model:"claude-haiku-4-5",max_tokens:2500,messages:[{role:"user",content:buildPrompt()}]})
+      body:JSON.stringify({model:"claude-haiku-4-5",max_tokens:4000,messages:[{role:"user",content:buildPrompt()}]})
     });
     const raw=await resp.text();
     let data;
@@ -249,7 +249,16 @@ async function gen(){
     if(!resp.ok) throw new Error("HTTP "+resp.status+": "+(data.error?.message||raw.slice(0,200)));
     const txt=data.content.map(i=>i.text||"").join("");
     let p;
-    try{p=JSON.parse(txt.replace(/```json|```/g,"").trim());}
+    try{
+      let clean=txt.trim();
+      // Extraire contenu entre balises ```
+      const m=clean.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if(m) clean=m[1].trim();
+      // Extraire entre { et dernière }
+      const s=clean.indexOf("{"), e=clean.lastIndexOf("}");
+      if(s!==-1 && e!==-1) clean=clean.slice(s,e+1);
+      p=JSON.parse(clean);
+    }
     catch(e){throw new Error("JSON invalide: "+txt.slice(0,300));}
     p.id=Date.now();p.generatedAt=new Date().toISOString();p.cfg={...cfg};
     plan=p;
