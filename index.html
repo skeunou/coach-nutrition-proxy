@@ -224,15 +224,23 @@ function buildPrompt(){
   const recent=hist.slice(0,4).flatMap(p=>(p.days||[]).flatMap(d=>[d.lunch?.name,d.dinner?.name].filter(Boolean)));
   const envies=document.getElementById("envies").value;
   const trainings=document.getElementById("trainings").value;
-  const jours=cfg.days;
-  // Exemple pour 1 jour — le modèle duplique le pattern
-  const ex='{"dayLabel":"Jour 1","trainingNote":null,"lunch":{"name":"Nom","description":"1 phrase","tags":["post-effort"],"prepTime":20,"macros":{"proteines":35,"glucides":60,"lipides":12},"microNote":"note micro","steps":["1","2","3"]},"dinner":{"name":"Nom","description":"1 phrase","tags":["anti-inflammatoire"],"prepTime":20,"macros":{"proteines":40,"glucides":45,"lipides":15},"microNote":"note","steps":["1","2","3"]}}';
-  return `Coach neuro-nutrition trail. Plan ${jours} jours pour ${FMT[cfg.fmt]}. ${CTX[cfg.ctx]}.${envies?" Contraintes/ingrédients à intégrer (1 seule recette max par ingrédient à finir, pas systématiquement): "+envies+".":""}${trainings?" Training: "+trainings+".":""}${recent.length?" Ne pas répéter: "+recent.slice(0,6).join(", ")+".":""}
-Réponds UNIQUEMENT en JSON valide sans markdown:
-{"context":"label","days":[${ex}],"shoppingList":{"Protéines":["item"],"Féculents":["item"],"Légumes":["item"],"Fruits":["item"],"Graisses & oléagineux":["item"],"Condiments & divers":["item"]},"weekSummary":"1 phrase."}
-Génère exactement ${jours} jours. Tags: post-effort, pre-effort, charge-glucidique, récup-protéique, anti-inflammatoire, léger.`;
-}
+  const ex=recent.length?" Ne pas répéter: "+recent.slice(0,6).join(", ")+".":"";
+  const entr=trainings?" Entraînements: "+trainings+".":"";
+  const excl=envies?" Contraintes/ingrédients à intégrer (1 seule recette max par ingrédient à finir, pas systématique): "+envies+".":"";
+  return `Coach neuro-nutrition trail. Plan ${cfg.days} jours pour ${FMT[cfg.fmt]}. ${CTX[cfg.ctx]}.${excl}${entr}${ex}
 
+RÈGLES NUTRITIONNELLES OBLIGATOIRES pour chaque repas :
+- Assiette équilibrée : 1/4 protéines (viande/poisson/œufs/légumineuses), 1/4 féculents (riz/pâtes/quinoa/patate douce), 1/2 fruits et légumes (variés, colorés)
+- 1 portion de bonnes graisses par repas (huile olive, avocat, oléagineux, poisson gras)
+- Pas de repas sans légumes — même en petite quantité
+- Varier les couleurs de légumes pour couvrir les micronutriments
+- Orientation performance trail : glucides complexes avant effort, protéines après effort, anti-inflammatoires (oméga-3, curcuma, baies) intégrés naturellement
+- Temps de préparation <30 min prioritaire
+
+JSON strict sans markdown :
+{"context":"label","days":[{"dayLabel":"Jour 1","trainingNote":null,"lunch":{"name":"Nom recette","description":"1 phrase incluant les légumes","tags":["post-effort"],"prepTime":20,"macros":{"proteines":35,"glucides":50,"lipides":15},"microNote":"note micronutriments clés","steps":["1","2","3"]},"dinner":{"name":"Nom","description":"1 phrase","tags":["anti-inflammatoire"],"prepTime":20,"macros":{"proteines":40,"glucides":40,"lipides":18},"microNote":"note","steps":["1","2","3"]}}],"shoppingList":{"Protéines":["item"],"Féculents":["item"],"Légumes":["item"],"Fruits":["item"],"Graisses & oléagineux":["item"],"Condiments & divers":["item"]},"weekSummary":"1 phrase résumé."}
+Génère exactement ${cfg.days} jours. Tags: post-effort, pre-effort, charge-glucidique, récup-protéique, anti-inflammatoire, léger.`;
+}
 async function gen(){
   document.getElementById("err").innerHTML="";
   document.getElementById("lov").classList.add("on");
