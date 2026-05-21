@@ -234,7 +234,8 @@ function buildPrompt(){
     charge:`Modulation semaine chargée : augmenter les glucides complexes (pâtes, riz, quinoa, patate douce) à 35-40% de l'assiette avant les sorties. Maintenir les protéines. Privilégier les anti-inflammatoires (oméga-3, curcuma, baies, gingembre).`,
     recup:`Modulation récupération : augmenter les protéines réparatrices (20-30g/repas minimum). Réduire légèrement les féculents. Maximiser les anti-inflammatoires et antioxydants (légumes colorés, baies, poisson gras, curcuma).`,
     normale:`Modulation semaine normale : respecter strictement l'équilibre de base. Varier les sources de protéines (viande/poisson/œufs/légumineuses en rotation). Diversifier les légumes.`,
-    affutage:`Modulation affûtage J-7 : aliments digestibles uniquement — pas de légumineuses, pas de chou, pas d'aliments nouveaux. Féculents faciles (riz blanc, pâtes blanches). Protéines maigres. Légumes cuits uniquement.`
+    affutage:`Modulation affûtage J-7 : aliments digestibles uniquement — pas de légumineuses, pas de chou, pas d'aliments nouveaux. Féculents faciles (riz blanc, pâtes blanches). Protéines maigres. Légumes cuits uniquement.`,
+    deficit:`Modulation déficit calorique : réduire les féculents à une portion poing fermé max (1/6 assiette). Augmenter les légumes à 2/3 de l'assiette. Protéines maintenues ou augmentées (poisson maigre, poulet, oeufs, légumineuses) pour préserver la masse musculaire. Graisses limitées à 1 filet huile olive par repas. Pas de sauces, pas de fromage. Éviter glucides le soir. Cible 400-500 kcal par repas.`
   };
 
   return `Coach neuro-nutrition trail. Génère un plan ${cfg.days} jours pour ${FMT[cfg.fmt]}.${excl}${entr}${ex}
