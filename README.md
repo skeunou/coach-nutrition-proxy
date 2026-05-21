@@ -1,2 +1,1 @@
-# coach-nutrition-proxy
-Proxy API pour Coach Nutrition Trail
+# Coach Nutrition — Proxy API
