@@ -315,8 +315,12 @@ async function generatePlan() {
     });
     const data = await resp.json();
     if(!resp.ok) throw new Error(data.error?.message||"Erreur API");
-    const raw = data.content.map(i=>i.text||"").join("");
-    const plan = JSON.parse(raw.replace(/```json|```/g,"").trim());
+    let rawText = "";
+    try { rawText = data.content.map(i=>i.text||"").join(""); }
+    catch(e2) { throw new Error("Réponse API inattendue: " + JSON.stringify(data).slice(0,300)); }
+    let plan;
+    try { plan = JSON.parse(rawText.replace(/```json|```/g,"").trim()); }
+    catch(e2) { throw new Error("JSON invalide: " + rawText.slice(0,300)); }
     plan.id = Date.now(); plan.generatedAt = new Date().toISOString(); plan.cfg = {...cfg};
     currentPlan = plan;
     history.unshift(plan);
@@ -328,7 +332,7 @@ async function generatePlan() {
     renderJournal();
     setTab("plan");
   } catch(e) {
-    document.getElementById("error-zone").innerHTML = `<div class="error-box">Erreur : ${e.message}</div>`;
+    document.getElementById("error-zone").innerHTML = `<div class="error-box">Erreur : ${e.message}<br><small>${e.stack||''}</small></div>`;
   }
   document.getElementById("loading").classList.remove("on");
   document.getElementById("gen-btn").disabled = false;
