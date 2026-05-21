@@ -286,23 +286,14 @@ function buildPrompt() {
   const recent = history.slice(0,4).flatMap(p=>(p.days||[]).flatMap(d=>[d.lunch?.name,d.dinner?.name].filter(Boolean)));
   const envies = document.getElementById("envies").value;
   const trainings = document.getElementById("trainings").value;
-  return `Tu es coach neuro-nutrition trail running. Génère un plan alimentaire.
-CONTEXTE : ${CTX_DESC[cfg.ctx]}
-JOURS : ${cfg.days}
-FORMAT : ${FORMAT_DESC[cfg.format]}
-${envies?"ENVIES/EXCLUSIONS : "+envies:""}
-${trainings?"ENTRAÎNEMENTS : "+trainings:""}
-${recent.length?"NE PAS RÉPÉTER :\n"+recent.map(n=>"- "+n).join("\n"):""}
-
-Chaque jour = 1 déjeuner + 1 dîner.
-Tags possibles : post-effort, pre-effort, charge-glucidique, récup-protéique, anti-inflammatoire, léger.
-Macros (protéines/glucides/lipides en g), prepTime (<30min prioritaire), microNote (magnésium/fer/oméga3/tryptophane/tyrosine/axe HPA), 3-5 étapes simples.
-
-RÉPONDS UNIQUEMENT EN JSON valide, sans markdown ni backticks :
-{"context":"...","days":[{"dayLabel":"Jour 1","trainingNote":null,"lunch":{"name":"...","description":"...","tags":["post-effort"],"prepTime":20,"macros":{"proteines":35,"glucides":60,"lipides":12},"microNote":"...","steps":["...","...","..."]},"dinner":{"name":"...","description":"...","tags":[],"prepTime":25,"macros":{"proteines":40,"glucides":45,"lipides":18},"microNote":"...","steps":["...","..."]}}],"shoppingList":{"Protéines":["Poulet 600g"],"Féculents":["Riz complet 500g"],"Légumes":["Épinards 300g"],"Fruits":["Bananes x6"],"Graisses & oléagineux":["Huile olive"],"Condiments & divers":["Curcuma"]},"weekSummary":"..."}`;
+  const ex = recent.length ? " Ne pas répéter: "+recent.slice(0,6).join(", ")+"." : "";
+  const entr = trainings ? " Entraînements: "+trainings+"." : "";
+  const excl = envies ? " Contraintes: "+envies+"." : "";
+  return `Coach neuro-nutrition trail. Génère un plan ${cfg.days} jours pour ${FORMAT_DESC[cfg.format]}. Contexte: ${CTX_DESC[cfg.ctx]}${excl}${entr}${ex}
+JSON strict sans markdown, structure exacte:
+{"context":"label court","days":[{"dayLabel":"Jour 1","trainingNote":null,"lunch":{"name":"Nom recette","description":"1 phrase","tags":["post-effort"],"prepTime":20,"macros":{"proteines":35,"glucides":60,"lipides":12},"microNote":"magnésium, oméga-3...","steps":["Étape 1","Étape 2","Étape 3"]},"dinner":{"name":"Nom","description":"1 phrase","tags":["anti-inflammatoire"],"prepTime":25,"macros":{"proteines":40,"glucides":45,"lipides":15},"microNote":"note micro","steps":["1","2","3"]}}],"shoppingList":{"Protéines":["Poulet 600g"],"Féculents":["Riz 500g"],"Légumes":["Épinards 300g"],"Fruits":["Bananes x4"],"Graisses & oléagineux":["Huile olive"],"Condiments & divers":["Curcuma"]},"weekSummary":"1 phrase résumé."}
+Tags possibles: post-effort, pre-effort, charge-glucidique, récup-protéique, anti-inflammatoire, léger. Réponds UNIQUEMENT le JSON.`;
 }
-
-// ── GENERATE ──
 async function generatePlan() {
   document.getElementById("error-zone").innerHTML = "";
   document.getElementById("loading").classList.add("on");
@@ -310,7 +301,7 @@ async function generatePlan() {
   try {
     const resp = await fetch("/.netlify/functions/generate", {
       method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ model:"claude-sonnet-4-5", max_tokens:2000,
+      body: JSON.stringify({ model:"claude-sonnet-4-5", max_tokens:1800,
         messages:[{role:"user",content:buildPrompt()}] })
     });
     let data;
