@@ -259,6 +259,8 @@ EXEMPLES de l'effet "twist":
 - ❌ "Poulet riz légumes vapeur" → ✅ "Poulet rôti herbes citron, riz basmati, légumes méditerranéens"
 - ❌ "Poisson féculents cuits" → ✅ "Filet de lieu rôti beurre blanc, pâtes fraîches persil, légumes glacés miel-soja"
 
+CONCISION (pour rapidité) : description = 1 phrase courte. twist = 3-5 mots. steps = 3 étapes max, courtes. microNote = 3-4 mots.
+
 JSON strict sans markdown :
 {"context":"label","days":[{"dayLabel":"Jour 1","trainingNote":null,"lunch":{"name":"Nom recette ÉVOCATEUR","description":"description avec élément signature (sauce/marinade/épices)","tags":["post-effort"],"twist":"ex: sauce thaï, marinade tikka, chimichurri","prepTime":25,"macros":{"proteines":35,"glucides":50,"lipides":15},"microNote":"magnésium, oméga-3, fer...","steps":["1","2","3"]},"dinner":{"name":"Nom recette","description":"description","tags":["anti-inflammatoire"],"twist":"ex: réduction balsamique","prepTime":30,"macros":{"proteines":40,"glucides":40,"lipides":18},"microNote":"note","steps":["1","2","3"]}}],"shoppingList":{"Protéines":["item"],"Féculents":["item"],"Légumes":["item"],"Fruits":["item"],"Graisses & oléagineux":["item"],"Condiments & divers":["item"]},"weekSummary":"1 phrase résumé."}
 Génère exactement ${cfg.days} jours. Tags: post-effort, pre-effort, charge-glucidique, récup-protéique, anti-inflammatoire, léger.`;
@@ -270,7 +272,7 @@ async function gen(){
   try{
     const resp=await fetch("/.netlify/functions/generate",{
       method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({model:"claude-haiku-4-5",max_tokens:4000,messages:[{role:"user",content:buildPrompt()}]})
+      body:JSON.stringify({model:"claude-haiku-4-5",max_tokens:2500,messages:[{role:"user",content:buildPrompt()}]})
     });
     const raw=await resp.text();
     let data;
