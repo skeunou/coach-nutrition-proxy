@@ -240,16 +240,27 @@ function buildPrompt(){
 
   return `Coach neuro-nutrition trail. Génère un plan ${cfg.days} jours pour ${FMT[cfg.fmt]}.${excl}${entr}${ex}
 
-BASE NUTRITIONNELLE OBLIGATOIRE (socle non négociable pour chaque repas) :
+BASE NUTRITIONNELLE OBLIGATOIRE (socle non négociable) :
 - Assiette : 1/4 protéines (viande/poisson/œufs/légumineuses), 1/4 féculents, 1/2 légumes et fruits
 - 1 portion de bonnes graisses par repas (huile olive, avocat, oléagineux, poisson gras)
 - Jamais de repas sans légumes — minimum 200g, variés et colorés
-- Temps préparation <30 min
+- Temps préparation MAXIMUM 40 min (ou exceptionnel si ${cfg.days} jours = 6-7)
 
 ${modulations[cfg.ctx]}
 
+APPÉTENCE & PEPS (règles mandatoires) :
+- Noms de plats ÉVOCATEURS (pas "Poulet légumes riz"). Exemples: "Poulet tikka mariné yaourt-curcuma", "Bo bun poulet-citronnelle", "Filet de plie rôti citron-persil"
+- CHAQUE recette doit avoir un élément signature : sauce/marinade/épices/croquant/acidité. Ex: "sauce thaï", "chimichurri", "réduction balsamique", "graines torréfiées", "citron-gingembre"
+- Rotation de cuisines : varier les registres (méditerranéen, thaï, mexicain, indien, libanais, marocain, japonais...)
+- Varier techniques cuisson (rôti, sauté, mijoté, plancha, bowl froid, vapeur...)
+- Légumes nommés et colorés, pas "petits légumes" générique
+
+EXEMPLES de l'effet "twist":
+- ❌ "Poulet riz légumes vapeur" → ✅ "Poulet rôti herbes citron, riz basmati, légumes méditerranéens"
+- ❌ "Poisson féculents cuits" → ✅ "Filet de lieu rôti beurre blanc, pâtes fraîches persil, légumes glacés miel-soja"
+
 JSON strict sans markdown :
-{"context":"label","days":[{"dayLabel":"Jour 1","trainingNote":null,"lunch":{"name":"Nom recette","description":"description incluant légumes et équilibre","tags":["post-effort"],"prepTime":20,"macros":{"proteines":35,"glucides":50,"lipides":15},"microNote":"note micronutriments clés (magnésium, oméga-3, fer...)","steps":["1","2","3"]},"dinner":{"name":"Nom","description":"description","tags":["anti-inflammatoire"],"prepTime":20,"macros":{"proteines":40,"glucides":40,"lipides":18},"microNote":"note","steps":["1","2","3"]}}],"shoppingList":{"Protéines":["item"],"Féculents":["item"],"Légumes":["item"],"Fruits":["item"],"Graisses & oléagineux":["item"],"Condiments & divers":["item"]},"weekSummary":"1 phrase résumé logique nutritionnelle + adaptation contexte."}
+{"context":"label","days":[{"dayLabel":"Jour 1","trainingNote":null,"lunch":{"name":"Nom recette ÉVOCATEUR","description":"description avec élément signature (sauce/marinade/épices)","tags":["post-effort"],"twist":"ex: sauce thaï, marinade tikka, chimichurri","prepTime":25,"macros":{"proteines":35,"glucides":50,"lipides":15},"microNote":"magnésium, oméga-3, fer...","steps":["1","2","3"]},"dinner":{"name":"Nom recette","description":"description","tags":["anti-inflammatoire"],"twist":"ex: réduction balsamique","prepTime":30,"macros":{"proteines":40,"glucides":40,"lipides":18},"microNote":"note","steps":["1","2","3"]}}],"shoppingList":{"Protéines":["item"],"Féculents":["item"],"Légumes":["item"],"Fruits":["item"],"Graisses & oléagineux":["item"],"Condiments & divers":["item"]},"weekSummary":"1 phrase résumé."}
 Génère exactement ${cfg.days} jours. Tags: post-effort, pre-effort, charge-glucidique, récup-protéique, anti-inflammatoire, léger.`;
 }
 async function gen(){
@@ -315,6 +326,7 @@ function mealH(meal,type,idx){
     </div>
     <div class="mdet" id="${id}">
       ${meal.description?`<div class="mdesc">${meal.description}</div>`:""}
+      ${meal.twist?`<div class="mdesc" style="color:var(--acc);font-weight:600;border-left:2px solid var(--acc);padding-left:10px;margin-bottom:8px">✨ ${meal.twist}</div>`:""}
       <div class="trow">${tagH(meal.tags)}<span class="tag tt">⏱ ${meal.prepTime||"?"}min</span></div>
       <div class="mg">
         <div class="mb"><div class="mv">${meal.macros?.proteines??"-"}g</div><div class="ml">Protéines</div></div>
