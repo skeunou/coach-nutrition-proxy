@@ -222,77 +222,99 @@ document.querySelectorAll("#fmt-g .tbtn").forEach(b=>b.addEventListener("click",
   b.className="tbtn on";
 }));
 
-function buildPrompt(){
-  const recent=hist.slice(0,4).flatMap(p=>(p.days||[]).flatMap(d=>[d.lunch?.name,d.dinner?.name].filter(Boolean)));
-  const envies=document.getElementById("envies").value;
-  const trainings=document.getElementById("trainings").value;
-  const ex=recent.length?" Ne pas répéter: "+recent.slice(0,6).join(", ")+".":"";
-  const entr=trainings?" Entraînements prévus: "+trainings+".":"";
-  const excl=envies?" Ingrédients à utiliser/exclusions (1 seule recette max par ingrédient à finir): "+envies+".":"";
+const MODULATIONS={
+  charge:`Modulation semaine chargée : glucides complexes augmentés (35-40% assiette) avant sorties. Protéines maintenues. Anti-inflammatoires prioritaires (oméga-3, curcuma, baies, gingembre).`,
+  recup:`Modulation récupération : protéines réparatrices 20-30g/repas min. Féculents réduits. Max anti-inflammatoires/antioxydants (légumes colorés, baies, poisson gras, curcuma).`,
+  normale:`Modulation semaine normale : équilibre de base strict. Varier sources protéines (viande/poisson/œufs/légumineuses). Diversifier légumes.`,
+  affutage:`Modulation affûtage J-7 : aliments digestibles seulement — pas de légumineuses/chou/aliments nouveaux. Féculents faciles (riz blanc, pâtes blanches). Protéines maigres. Légumes cuits.`,
+  deficit:`Modulation déficit : féculents 1/6 assiette max. Légumes 2/3 assiette. Protéines maintenues/augmentées. Graisses limitées (1 filet huile olive). Pas de sauces/fromage. Cible 400-500 kcal/repas.`
+};
+// Une cuisine assignée par jour → variété forcée + anti-répétition entre jours
+const CUISINES=["méditerranéenne (Grèce/Italie/Espagne)","asiatique (thaï, vietnamien, japonais)","mexicaine / tex-mex","indienne / curry parfumé","libanaise / moyen-orient (mezze)","française terroir revisité","marocaine / tajine épicé"];
 
-  const modulations={
-    charge:`Modulation semaine chargée : augmenter les glucides complexes (pâtes, riz, quinoa, patate douce) à 35-40% de l'assiette avant les sorties. Maintenir les protéines. Privilégier les anti-inflammatoires (oméga-3, curcuma, baies, gingembre).`,
-    recup:`Modulation récupération : augmenter les protéines réparatrices (20-30g/repas minimum). Réduire légèrement les féculents. Maximiser les anti-inflammatoires et antioxydants (légumes colorés, baies, poisson gras, curcuma).`,
-    normale:`Modulation semaine normale : respecter strictement l'équilibre de base. Varier les sources de protéines (viande/poisson/œufs/légumineuses en rotation). Diversifier les légumes.`,
-    affutage:`Modulation affûtage J-7 : aliments digestibles uniquement — pas de légumineuses, pas de chou, pas d'aliments nouveaux. Féculents faciles (riz blanc, pâtes blanches). Protéines maigres. Légumes cuits uniquement.`,
-    deficit:`Modulation déficit calorique : réduire les féculents à une portion poing fermé max (1/6 assiette). Augmenter les légumes à 2/3 de l'assiette. Protéines maintenues ou augmentées (poisson maigre, poulet, oeufs, légumineuses) pour préserver la masse musculaire. Graisses limitées à 1 filet huile olive par repas. Pas de sauces, pas de fromage. Éviter glucides le soir. Cible 400-500 kcal par repas.`
-  };
+function buildDayPrompt(dayIdx,recent,envies,trainings){
+  const cuisine=CUISINES[dayIdx%CUISINES.length];
+  const ex=recent.length?" Ne pas reprendre: "+recent.slice(0,6).join(", ")+".":"";
+  const entr=trainings?" Entraînements: "+trainings+".":"";
+  const excl=envies?" Contraintes/ingrédients: "+envies+".":"";
+  return `Coach neuro-nutrition trail. Génère 1 JOURNÉE (déjeuner + dîner) pour ${FMT[cfg.fmt]}.${excl}${entr}${ex}
+REGISTRE CULINAIRE IMPOSÉ POUR CE JOUR : ${cuisine}. Les 2 repas s'inspirent de ce registre (mais restent distincts).
 
-  return `Coach neuro-nutrition trail. Génère un plan ${cfg.days} jours pour ${FMT[cfg.fmt]}.${excl}${entr}${ex}
+SOCLE OBLIGATOIRE (chaque repas) :
+- 1/4 protéines, 1/4 féculents, 1/2 légumes et fruits (min 200g, variés/colorés)
+- 1 portion bonnes graisses (huile olive, avocat, oléagineux, poisson gras)
+- Jamais de repas sans légumes. Temps prépa MAX 40 min.
 
-BASE NUTRITIONNELLE OBLIGATOIRE (socle non négociable) :
-- Assiette : 1/4 protéines (viande/poisson/œufs/légumineuses), 1/4 féculents, 1/2 légumes et fruits
-- 1 portion de bonnes graisses par repas (huile olive, avocat, oléagineux, poisson gras)
-- Jamais de repas sans légumes — minimum 200g, variés et colorés
-- Temps préparation MAXIMUM 40 min (ou exceptionnel si ${cfg.days} jours = 6-7)
+${MODULATIONS[cfg.ctx]||MODULATIONS.normale}
 
-${modulations[cfg.ctx]}
-
-APPÉTENCE & PEPS (règles mandatoires) :
-- Noms de plats ÉVOCATEURS (pas "Poulet légumes riz"). Exemples: "Poulet tikka mariné yaourt-curcuma", "Bo bun poulet-citronnelle", "Filet de plie rôti citron-persil"
-- CHAQUE recette doit avoir un élément signature : sauce/marinade/épices/croquant/acidité. Ex: "sauce thaï", "chimichurri", "réduction balsamique", "graines torréfiées", "citron-gingembre"
-- Rotation de cuisines : varier les registres (méditerranéen, thaï, mexicain, indien, libanais, marocain, japonais...)
-- Varier techniques cuisson (rôti, sauté, mijoté, plancha, bowl froid, vapeur...)
+APPÉTENCE & PEPS (mandatoire) :
+- Noms ÉVOCATEURS (jamais "Poulet légumes riz")
+- CHAQUE recette a un élément signature : sauce/marinade/épices/croquant/acidité
 - Légumes nommés et colorés, pas "petits légumes" générique
-
-EXEMPLES de l'effet "twist":
-- ❌ "Poulet riz légumes vapeur" → ✅ "Poulet rôti herbes citron, riz basmati, légumes méditerranéens"
-- ❌ "Poisson féculents cuits" → ✅ "Filet de lieu rôti beurre blanc, pâtes fraîches persil, légumes glacés miel-soja"
-
-CONCISION (pour rapidité) : description = 1 phrase courte. twist = 3-5 mots. steps = 3 étapes max, courtes. microNote = 3-4 mots.
+EXEMPLES : ❌ "Poulet riz légumes vapeur" → ✅ "Poulet rôti herbes citron, riz basmati, légumes méditerranéens" · ❌ "Poisson féculents" → ✅ "Filet de lieu beurre blanc, pâtes fraîches persil, légumes glacés miel-soja"
+CONCISION : description = 1 phrase. twist = 3-5 mots. steps = 3 max courtes. microNote = 3-4 mots.
 
 JSON strict sans markdown :
-{"context":"label","days":[{"dayLabel":"Jour 1","trainingNote":null,"lunch":{"name":"Nom recette ÉVOCATEUR","description":"description avec élément signature (sauce/marinade/épices)","tags":["post-effort"],"twist":"ex: sauce thaï, marinade tikka, chimichurri","prepTime":25,"macros":{"proteines":35,"glucides":50,"lipides":15},"microNote":"magnésium, oméga-3, fer...","steps":["1","2","3"]},"dinner":{"name":"Nom recette","description":"description","tags":["anti-inflammatoire"],"twist":"ex: réduction balsamique","prepTime":30,"macros":{"proteines":40,"glucides":40,"lipides":18},"microNote":"note","steps":["1","2","3"]}}],"shoppingList":{"Protéines":["item"],"Féculents":["item"],"Légumes":["item"],"Fruits":["item"],"Graisses & oléagineux":["item"],"Condiments & divers":["item"]},"weekSummary":"1 phrase résumé."}
-Génère exactement ${cfg.days} jours. Tags: post-effort, pre-effort, charge-glucidique, récup-protéique, anti-inflammatoire, léger.`;
+{"trainingNote":null,"lunch":{"name":"Nom ÉVOCATEUR","description":"1 phrase avec signature","tags":["post-effort"],"twist":"3-5 mots","prepTime":25,"macros":{"proteines":35,"glucides":50,"lipides":15},"microNote":"3-4 mots","steps":["1","2","3"]},"dinner":{"name":"Nom","description":"1 phrase","tags":["anti-inflammatoire"],"twist":"3-5 mots","prepTime":30,"macros":{"proteines":40,"glucides":40,"lipides":18},"microNote":"note","steps":["1","2","3"]},"shoppingList":{"Protéines":["item"],"Féculents":["item"],"Légumes":["item"],"Fruits":["item"],"Graisses & oléagineux":["item"],"Condiments & divers":["item"]}}
+Tags possibles: post-effort, pre-effort, charge-glucidique, récup-protéique, anti-inflammatoire, léger.`;
 }
+
+function parsePlanJSON(txt){
+  let clean=txt.trim();
+  const m=clean.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if(m) clean=m[1].trim();
+  const s=clean.indexOf("{"), e=clean.lastIndexOf("}");
+  if(s!==-1 && e!==-1) clean=clean.slice(s,e+1);
+  return JSON.parse(clean);
+}
+
+async function callDay(dayIdx,recent,envies,trainings){
+  const resp=await fetch("/.netlify/functions/generate",{
+    method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({model:"claude-haiku-4-5",max_tokens:1200,messages:[{role:"user",content:buildDayPrompt(dayIdx,recent,envies,trainings)}]})
+  });
+  const raw=await resp.text();
+  let data;
+  try{data=JSON.parse(raw);}
+  catch(e){throw new Error("Réponse invalide J"+(dayIdx+1)+" ("+resp.status+"): "+raw.slice(0,150));}
+  if(!resp.ok) throw new Error("HTTP "+resp.status+" J"+(dayIdx+1)+": "+(data.error?.message||raw.slice(0,150)));
+  const txt=data.content.map(i=>i.text||"").join("");
+  try{return parsePlanJSON(txt);}
+  catch(e){throw new Error("JSON invalide J"+(dayIdx+1)+": "+txt.slice(0,200));}
+}
+
 async function gen(){
   document.getElementById("err").innerHTML="";
   document.getElementById("lov").classList.add("on");
   document.getElementById("gen-btn").disabled=true;
   try{
-    const resp=await fetch("/.netlify/functions/generate",{
-      method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({model:"claude-haiku-4-5",max_tokens:2500,messages:[{role:"user",content:buildPrompt()}]})
+    const recent=hist.slice(0,4).flatMap(p=>(p.days||[]).flatMap(d=>[d.lunch?.name,d.dinner?.name].filter(Boolean)));
+    const envies=document.getElementById("envies").value;
+    const trainings=document.getElementById("trainings").value;
+
+    // 1 appel par jour, EN PARALLÈLE → réponses courtes → ni timeout ni troncature
+    const dayResults=await Promise.all(
+      Array.from({length:cfg.days},(_,i)=>callDay(i,recent,envies,trainings))
+    );
+
+    // Assemblage en un objet plan identique à l'ancienne structure
+    const SHOP_KEYS=["Protéines","Féculents","Légumes","Fruits","Graisses & oléagineux","Condiments & divers"];
+    const merged={};SHOP_KEYS.forEach(k=>merged[k]=[]);
+    const days=dayResults.map((d,i)=>{
+      if(d.shoppingList) SHOP_KEYS.forEach(k=>{
+        (d.shoppingList[k]||[]).forEach(it=>{
+          if(it && !merged[k].some(x=>x.toLowerCase().trim()===String(it).toLowerCase().trim())) merged[k].push(it);
+        });
+      });
+      return {dayLabel:"Jour "+(i+1),trainingNote:d.trainingNote||null,lunch:d.lunch,dinner:d.dinner};
     });
-    const raw=await resp.text();
-    let data;
-    try{data=JSON.parse(raw);}
-    catch(e){throw new Error("Réponse invalide ("+resp.status+"): "+raw.slice(0,200));}
-    if(!resp.ok) throw new Error("HTTP "+resp.status+": "+(data.error?.message||raw.slice(0,200)));
-    const txt=data.content.map(i=>i.text||"").join("");
-    let p;
-    try{
-      let clean=txt.trim();
-      // Extraire contenu entre balises ```
-      const m=clean.match(/```(?:json)?\s*([\s\S]*?)```/);
-      if(m) clean=m[1].trim();
-      // Extraire entre { et dernière }
-      const s=clean.indexOf("{"), e=clean.lastIndexOf("}");
-      if(s!==-1 && e!==-1) clean=clean.slice(s,e+1);
-      p=JSON.parse(clean);
-    }
-    catch(e){throw new Error("JSON invalide: "+txt.slice(0,300));}
-    p.id=Date.now();p.generatedAt=new Date().toISOString();p.cfg={...cfg};
+
+    const p={
+      context:CTX[cfg.ctx]?cfg.ctx.charAt(0).toUpperCase()+cfg.ctx.slice(1):"Plan",
+      days,shoppingList:merged,
+      weekSummary:`Plan ${cfg.days} jour(s) · ${(CTX[cfg.ctx]||"semaine normale")}. Cuisines variées, socle équilibré maintenu.`,
+      id:Date.now(),generatedAt:new Date().toISOString(),cfg:{...cfg}
+    };
     plan=p;
     hist.unshift(p);if(hist.length>12)hist=hist.slice(0,12);
     await saveHist();
