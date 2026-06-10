@@ -252,10 +252,10 @@ APPÉTENCE & PEPS (mandatoire) :
 - CHAQUE recette a un élément signature : sauce/marinade/épices/croquant/acidité
 - Légumes nommés et colorés, pas "petits légumes" générique
 EXEMPLES : ❌ "Poulet riz légumes vapeur" → ✅ "Poulet rôti herbes citron, riz basmati, légumes méditerranéens" · ❌ "Poisson féculents" → ✅ "Filet de lieu beurre blanc, pâtes fraîches persil, légumes glacés miel-soja"
-CONCISION : description = 1 phrase. twist = 3-5 mots. steps = 3 max courtes. microNote = 3-4 mots.
+CONCISION (STRICT, sinon réponse coupée) : description = 1 phrase courte. twist = 3-5 mots. steps = 3 étapes TRÈS courtes (max 10 mots chacune). microNote = 3-4 mots. trainingNote TOUJOURS null (ne rien écrire dedans).
 
 JSON strict sans markdown :
-{"trainingNote":null,"lunch":{"name":"Nom ÉVOCATEUR","description":"1 phrase avec signature","tags":["post-effort"],"twist":"3-5 mots","prepTime":25,"macros":{"proteines":35,"glucides":50,"lipides":15},"microNote":"3-4 mots","steps":["1","2","3"]},"dinner":{"name":"Nom","description":"1 phrase","tags":["anti-inflammatoire"],"twist":"3-5 mots","prepTime":30,"macros":{"proteines":40,"glucides":40,"lipides":18},"microNote":"note","steps":["1","2","3"]},"shoppingList":{"Protéines":["item"],"Féculents":["item"],"Légumes":["item"],"Fruits":["item"],"Graisses & oléagineux":["item"],"Condiments & divers":["item"]}}
+{"trainingNote":null,"lunch":{"name":"Nom ÉVOCATEUR","description":"1 phrase avec signature","tags":["post-effort"],"twist":"3-5 mots","prepTime":25,"macros":{"proteines":35,"glucides":50,"lipides":15},"microNote":"3-4 mots","steps":["étape courte","étape courte","étape courte"]},"dinner":{"name":"Nom","description":"1 phrase","tags":["anti-inflammatoire"],"twist":"3-5 mots","prepTime":30,"macros":{"proteines":40,"glucides":40,"lipides":18},"microNote":"note","steps":["étape courte","étape courte","étape courte"]},"shoppingList":{"Protéines":["item"],"Féculents":["item"],"Légumes":["item"],"Fruits":["item"],"Graisses & oléagineux":["item"],"Condiments & divers":["item"]}}
 Tags possibles: post-effort, pre-effort, charge-glucidique, récup-protéique, anti-inflammatoire, léger.`;
 }
 
@@ -269,18 +269,25 @@ function parsePlanJSON(txt){
 }
 
 async function callDay(dayIdx,recent,envies,trainings){
-  const resp=await fetch("/.netlify/functions/generate",{
-    method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({model:"claude-haiku-4-5",max_tokens:1200,messages:[{role:"user",content:buildDayPrompt(dayIdx,recent,envies,trainings)}]})
-  });
-  const raw=await resp.text();
-  let data;
-  try{data=JSON.parse(raw);}
-  catch(e){throw new Error("Réponse invalide J"+(dayIdx+1)+" ("+resp.status+"): "+raw.slice(0,150));}
-  if(!resp.ok) throw new Error("HTTP "+resp.status+" J"+(dayIdx+1)+": "+(data.error?.message||raw.slice(0,150)));
-  const txt=data.content.map(i=>i.text||"").join("");
-  try{return parsePlanJSON(txt);}
-  catch(e){throw new Error("JSON invalide J"+(dayIdx+1)+": "+txt.slice(0,200));}
+  let lastErr;
+  // 2 tentatives : absorbe les ratés ponctuels du modèle (JSON malformé/tronqué)
+  for(let attempt=0;attempt<2;attempt++){
+    try{
+      const resp=await fetch("/.netlify/functions/generate",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({model:"claude-haiku-4-5",max_tokens:1500,messages:[{role:"user",content:buildDayPrompt(dayIdx,recent,envies,trainings)}]})
+      });
+      const raw=await resp.text();
+      let data;
+      try{data=JSON.parse(raw);}
+      catch(e){throw new Error("Réponse invalide J"+(dayIdx+1)+" ("+resp.status+"): "+raw.slice(0,150));}
+      if(!resp.ok) throw new Error("HTTP "+resp.status+" J"+(dayIdx+1)+": "+(data.error?.message||raw.slice(0,150)));
+      const txt=data.content.map(i=>i.text||"").join("");
+      try{return parsePlanJSON(txt);}
+      catch(e){throw new Error("JSON invalide J"+(dayIdx+1)+": "+txt.slice(0,200));}
+    }catch(e){lastErr=e;}
+  }
+  throw lastErr;
 }
 
 async function gen(){
