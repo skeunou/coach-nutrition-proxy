@@ -153,6 +153,14 @@
         </div>
       </div>
       <div class="fg">
+        <label class="flbl">Adaptations / Régime (cumulables)</label>
+        <div class="bg" id="diet-g">
+          <button class="tbtn" id="prot-btn" data-d="prot">💪 +Protéines</button>
+          <button class="tbtn" id="vege-btn" data-d="vege">🌱 Végétarien</button>
+          <button class="tbtn" id="gluten-btn" data-d="gluten">🌾 Sans gluten</button>
+        </div>
+      </div>
+      <div class="fg">
         <label class="flbl">Ingrédients à utiliser / Exclusions</label>
         <textarea id="envies" placeholder="Ex: j'ai du poulet à finir (1 recette max), pas de riz cette semaine..."></textarea>
       </div>
@@ -193,7 +201,7 @@ const CTX={
 const FMT={solo:"1 personne",couple:"2 personnes",famille:"famille avec enfants"};
 const TAGCLS={"post-effort":"tp","pre-effort":"tpr","charge-glucidique":"tg","récup-protéique":"tr","anti-inflammatoire":"ta","léger":"tl"};
 
-let cfg={ctx:"charge",days:3,fmt:"solo",ete:false};
+let cfg={ctx:"charge",days:3,fmt:"solo",ete:false,prot:false,vege:false,gluten:false};
 let plan=null,hist=[];
 
 async function loadHist(){
@@ -231,6 +239,11 @@ document.getElementById("ete-btn").addEventListener("click",function(){
   cfg.ete=!cfg.ete;
   this.className=cfg.ete?"tbtn on-o":"tbtn";
 });
+document.querySelectorAll("#diet-g .tbtn").forEach(b=>b.addEventListener("click",function(){
+  const d=this.dataset.d;
+  cfg[d]=!cfg[d];
+  this.className=cfg[d]?"tbtn on-g":"tbtn";
+}));
 
 const MODULATIONS={
   charge:`Modulation semaine chargée : glucides complexes augmentés (35-40% assiette) avant sorties. Protéines maintenues. Anti-inflammatoires prioritaires (oméga-3, curcuma, baies, gingembre).`,
@@ -247,14 +260,23 @@ function buildDayPrompt(dayIdx,recent,envies,trainings,fishAllowed){
   const ex=recent.length?" Ne pas reprendre: "+recent.slice(0,6).join(", ")+".":"";
   const entr=trainings?" Entraînements: "+trainings+".":"";
   const excl=envies?" Contraintes/ingrédients: "+envies+".":"";
-  const fish=fishAllowed
+  // En mode végétarien, le poisson est exclu d'office → pas de ligne poisson (la directive végé gère)
+  const fish=cfg.vege?``:(fishAllowed
     ? `\nPOISSON : autorisé dans UN SEUL des deux repas aujourd'hui (pas les deux). L'autre repas = autre protéine (viande, volaille, œufs, légumineuses).`
-    : `\nPOISSON : INTERDIT aujourd'hui. Varie les protéines (volaille, viande, œufs, légumineuses, tofu).`;
+    : `\nPOISSON : INTERDIT aujourd'hui. Varie les protéines (volaille, viande, œufs, légumineuses, tofu).`);
   const ete=cfg.ete
     ? `\nMODE ÉTÉ (impératif) : recettes FRAÎCHES et estivales. Cuisson minimale, PAS DE FOUR. Privilégier cru, snacking, poêle/plancha rapide : salades composées, bowls froids, tartares, carpaccios, gaspacho, marinades fraîches, grillades légères. Légumes croquants de saison (tomate, courgette, concombre, poivron, fenouil, radis). Herbes fraîches et agrumes pour le peps.${cfg.ctx==="affutage"?" (Exception affûtage : froid OUI mais digestible — pas de crudités difficiles ni légumineuses, légumes cuits puis refroidis.)":""}`
     : ``;
+  const famille=cfg.fmt==="famille"
+    ? `\nMODE FAMILLE (enfants difficiles) : recettes PASSE-PARTOUT et consensuelles. Saveurs douces, peu ou pas pimentées, textures simples. Éviter les aliments clivants (goûts très forts/amers, abats, épices agressives, poissons puissants). Formats appréciés : gratins légers, pâtes, boulettes, wraps, plats à partager, légumes bien intégrés/fondus. Adapter le registre culinaire imposé en VERSION DOUCE (ex: curry indien doux, mexicain non piquant). RESTER équilibré : le socle s'applique pleinement, légumes présents même si discrets.`
+    : ``;
+  const diet=[
+    cfg.prot?`\n+PROTÉINES : augmenter la part protéique, viser 35-45g de protéines par repas (sources de qualité). Réduire légèrement les féculents si nécessaire pour garder l'équilibre.`:``,
+    cfg.vege?`\nVÉGÉTARIEN STRICT : AUCUNE viande ni poisson. Protéines = légumineuses, tofu, tempeh, œufs, fromage/laitages, oléagineux. Assurer la complémentarité céréales + légumineuses et veiller fer/B12.`:``,
+    cfg.gluten?`\nSANS GLUTEN STRICT : aucun blé, pâtes classiques, pain, semoule, boulgour, orge, épeautre. Féculents autorisés : riz, quinoa, sarrasin, patate douce, maïs/polenta, pommes de terre, légumineuses. Sauce soja → tamari sans gluten.`:``
+  ].join("");
   return `Coach neuro-nutrition trail. Génère 1 JOURNÉE (déjeuner + dîner) pour ${FMT[cfg.fmt]}.${excl}${entr}${ex}
-REGISTRE CULINAIRE IMPOSÉ POUR CE JOUR : ${cuisine}. Les 2 repas s'inspirent de ce registre (mais restent distincts).${fish}${ete}
+REGISTRE CULINAIRE IMPOSÉ POUR CE JOUR : ${cuisine}. Les 2 repas s'inspirent de ce registre (mais restent distincts).${fish}${ete}${famille}${diet}
 
 SOCLE OBLIGATOIRE (chaque repas) :
 - 1/4 protéines, 1/4 féculents, 1/2 légumes et fruits (min 200g, variés/colorés)
@@ -315,10 +337,10 @@ async function gen(){
     const envies=document.getElementById("envies").value;
     const trainings=document.getElementById("trainings").value;
 
-    // Quota poisson sur la semaine : 2 si >5 jours, sinon 1. Jours répartis et pré-assignés.
-    const nbFish=cfg.days>5?2:1;
+    // Quota poisson sur la semaine : 0 si végé, sinon 2 si >5 jours, 1 sinon. Jours répartis.
+    const nbFish=cfg.vege?0:(cfg.days>5?2:1);
     const fishDays=new Set();
-    for(let k=0;k<Math.min(nbFish,cfg.days);k++) fishDays.add(Math.round(k*cfg.days/Math.min(nbFish,cfg.days)));
+    if(nbFish>0) for(let k=0;k<Math.min(nbFish,cfg.days);k++) fishDays.add(Math.round(k*cfg.days/Math.min(nbFish,cfg.days)));
 
     // 1 appel par jour, EN PARALLÈLE → réponses courtes → ni timeout ni troncature
     const dayResults=await Promise.all(
