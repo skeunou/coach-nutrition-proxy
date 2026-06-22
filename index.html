@@ -147,6 +147,12 @@
         </div>
       </div>
       <div class="fg">
+        <label class="flbl">Mode saison</label>
+        <div class="bg" id="ete-g">
+          <button class="tbtn" id="ete-btn" data-v="off">☀️ Mode Été — recettes fraîches, peu de cuisson, pas de four</button>
+        </div>
+      </div>
+      <div class="fg">
         <label class="flbl">Ingrédients à utiliser / Exclusions</label>
         <textarea id="envies" placeholder="Ex: j'ai du poulet à finir (1 recette max), pas de riz cette semaine..."></textarea>
       </div>
@@ -187,7 +193,7 @@ const CTX={
 const FMT={solo:"1 personne",couple:"2 personnes",famille:"famille avec enfants"};
 const TAGCLS={"post-effort":"tp","pre-effort":"tpr","charge-glucidique":"tg","récup-protéique":"tr","anti-inflammatoire":"ta","léger":"tl"};
 
-let cfg={ctx:"charge",days:3,fmt:"solo"};
+let cfg={ctx:"charge",days:3,fmt:"solo",ete:false};
 let plan=null,hist=[];
 
 async function loadHist(){
@@ -221,6 +227,10 @@ document.querySelectorAll("#fmt-g .tbtn").forEach(b=>b.addEventListener("click",
   document.querySelectorAll("#fmt-g .tbtn").forEach(x=>x.className="tbtn");
   b.className="tbtn on";
 }));
+document.getElementById("ete-btn").addEventListener("click",function(){
+  cfg.ete=!cfg.ete;
+  this.className=cfg.ete?"tbtn on-o":"tbtn";
+});
 
 const MODULATIONS={
   charge:`Modulation semaine chargée : glucides complexes augmentés (35-40% assiette) avant sorties. Protéines maintenues. Anti-inflammatoires prioritaires (oméga-3, curcuma, baies, gingembre).`,
@@ -232,13 +242,19 @@ const MODULATIONS={
 // Une cuisine assignée par jour → variété forcée + anti-répétition entre jours
 const CUISINES=["méditerranéenne (Grèce/Italie/Espagne)","asiatique (thaï, vietnamien, japonais)","mexicaine / tex-mex","indienne / curry parfumé","libanaise / moyen-orient (mezze)","française terroir revisité","marocaine / tajine épicé"];
 
-function buildDayPrompt(dayIdx,recent,envies,trainings){
+function buildDayPrompt(dayIdx,recent,envies,trainings,fishAllowed){
   const cuisine=CUISINES[dayIdx%CUISINES.length];
   const ex=recent.length?" Ne pas reprendre: "+recent.slice(0,6).join(", ")+".":"";
   const entr=trainings?" Entraînements: "+trainings+".":"";
   const excl=envies?" Contraintes/ingrédients: "+envies+".":"";
+  const fish=fishAllowed
+    ? `\nPOISSON : autorisé dans UN SEUL des deux repas aujourd'hui (pas les deux). L'autre repas = autre protéine (viande, volaille, œufs, légumineuses).`
+    : `\nPOISSON : INTERDIT aujourd'hui. Varie les protéines (volaille, viande, œufs, légumineuses, tofu).`;
+  const ete=cfg.ete
+    ? `\nMODE ÉTÉ (impératif) : recettes FRAÎCHES et estivales. Cuisson minimale, PAS DE FOUR. Privilégier cru, snacking, poêle/plancha rapide : salades composées, bowls froids, tartares, carpaccios, gaspacho, marinades fraîches, grillades légères. Légumes croquants de saison (tomate, courgette, concombre, poivron, fenouil, radis). Herbes fraîches et agrumes pour le peps.${cfg.ctx==="affutage"?" (Exception affûtage : froid OUI mais digestible — pas de crudités difficiles ni légumineuses, légumes cuits puis refroidis.)":""}`
+    : ``;
   return `Coach neuro-nutrition trail. Génère 1 JOURNÉE (déjeuner + dîner) pour ${FMT[cfg.fmt]}.${excl}${entr}${ex}
-REGISTRE CULINAIRE IMPOSÉ POUR CE JOUR : ${cuisine}. Les 2 repas s'inspirent de ce registre (mais restent distincts).
+REGISTRE CULINAIRE IMPOSÉ POUR CE JOUR : ${cuisine}. Les 2 repas s'inspirent de ce registre (mais restent distincts).${fish}${ete}
 
 SOCLE OBLIGATOIRE (chaque repas) :
 - 1/4 protéines, 1/4 féculents, 1/2 légumes et fruits (min 200g, variés/colorés)
@@ -268,14 +284,14 @@ function parsePlanJSON(txt){
   return JSON.parse(clean);
 }
 
-async function callDay(dayIdx,recent,envies,trainings){
+async function callDay(dayIdx,recent,envies,trainings,fishAllowed){
   let lastErr;
   // 2 tentatives : absorbe les ratés ponctuels du modèle (JSON malformé/tronqué)
   for(let attempt=0;attempt<2;attempt++){
     try{
       const resp=await fetch("/.netlify/functions/generate",{
         method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:"claude-haiku-4-5",max_tokens:1500,messages:[{role:"user",content:buildDayPrompt(dayIdx,recent,envies,trainings)}]})
+        body:JSON.stringify({model:"claude-haiku-4-5",max_tokens:1500,messages:[{role:"user",content:buildDayPrompt(dayIdx,recent,envies,trainings,fishAllowed)}]})
       });
       const raw=await resp.text();
       let data;
@@ -299,9 +315,14 @@ async function gen(){
     const envies=document.getElementById("envies").value;
     const trainings=document.getElementById("trainings").value;
 
+    // Quota poisson sur la semaine : 2 si >5 jours, sinon 1. Jours répartis et pré-assignés.
+    const nbFish=cfg.days>5?2:1;
+    const fishDays=new Set();
+    for(let k=0;k<Math.min(nbFish,cfg.days);k++) fishDays.add(Math.round(k*cfg.days/Math.min(nbFish,cfg.days)));
+
     // 1 appel par jour, EN PARALLÈLE → réponses courtes → ni timeout ni troncature
     const dayResults=await Promise.all(
-      Array.from({length:cfg.days},(_,i)=>callDay(i,recent,envies,trainings))
+      Array.from({length:cfg.days},(_,i)=>callDay(i,recent,envies,trainings,fishDays.has(i)))
     );
 
     // Assemblage en un objet plan identique à l'ancienne structure
