@@ -58,21 +58,24 @@ exports.handler = async (event) => {
     return { statusCode: 200, headers: h, body: JSON.stringify(r.json) };
   }
 
-  // 4) Data — activités récentes
+  // 4) Data — cumul de la semaine + dernières activités
   if (action === "data" && q.token) {
-    const r = await getJSON("www.strava.com", "/api/v3/athlete/activities?per_page=10", q.token);
+    const ws = parseInt(q.weekStart || "0");
+    const r = await getJSON("www.strava.com", "/api/v3/athlete/activities?per_page=20", q.token);
     const acts = r.json;
     if (!Array.isArray(acts)) {
       return { statusCode: 200, headers: h, body: JSON.stringify({ error: (acts && acts.message) || "no_data", detail: acts }) };
     }
-    let km = 0, d = 0;
-    acts.forEach((a) => { if (a.distance) km += a.distance / 1000; if (a.total_elevation_gain) d += a.total_elevation_gain; });
+    let wk = 0, wd = 0, wc = 0;
+    acts.forEach((a) => {
+      const ts = Date.parse(a.start_date) / 1000;
+      if (ws && ts >= ws) { if (a.distance) wk += a.distance / 1000; if (a.total_elevation_gain) wd += a.total_elevation_gain; wc++; }
+    });
     return {
       statusCode: 200, headers: h,
       body: JSON.stringify({
-        kmRecent: km.toFixed(1), dRecent: Math.round(d),
-        last: acts[0] ? { name: acts[0].name, km: (acts[0].distance / 1000).toFixed(1), date: (acts[0].start_date || "").split("T")[0] } : null,
-        activities: acts.slice(0, 4).map((a) => ({ name: a.name, type: a.sport_type || a.type, km: (a.distance / 1000).toFixed(1), dplus: Math.round(a.total_elevation_gain || 0), date: (a.start_date || "").split("T")[0] })),
+        weekKm: wk.toFixed(1), weekD: Math.round(wd), weekCount: wc,
+        activities: acts.slice(0, 3).map((a) => ({ name: a.name, type: a.sport_type || a.type, km: (a.distance / 1000).toFixed(1), dplus: Math.round(a.total_elevation_gain || 0), date: (a.start_date || "").split("T")[0] })),
       }),
     };
   }
