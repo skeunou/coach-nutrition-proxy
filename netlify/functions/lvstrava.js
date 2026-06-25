@@ -61,7 +61,7 @@ exports.handler = async (event) => {
   // 4) Data — cumul de la semaine + dernières activités
   if (action === "data" && q.token) {
     const ws = parseInt(q.weekStart || "0");
-    const r = await getJSON("www.strava.com", "/api/v3/athlete/activities?per_page=20", q.token);
+    const r = await getJSON("www.strava.com", "/api/v3/athlete/activities?per_page=30", q.token);
     const acts = r.json;
     if (!Array.isArray(acts)) {
       return { statusCode: 200, headers: h, body: JSON.stringify({ error: (acts && acts.message) || "no_data", detail: acts }) };
@@ -76,6 +76,18 @@ exports.handler = async (event) => {
       body: JSON.stringify({
         weekKm: wk.toFixed(1), weekD: Math.round(wd), weekCount: wc,
         activities: acts.slice(0, 3).map((a) => ({ name: a.name, type: a.sport_type || a.type, km: (a.distance / 1000).toFixed(1), dplus: Math.round(a.total_elevation_gain || 0), date: (a.start_date || "").split("T")[0] })),
+        all: acts.map((a) => ({
+          id: a.id,
+          name: a.name || "",
+          type: a.sport_type || a.type || "",
+          km: +(a.distance / 1000).toFixed(2),
+          dplus: Math.round(a.total_elevation_gain || 0),
+          movingMin: Math.round((a.moving_time || 0) / 60),
+          elapsedMin: Math.round((a.elapsed_time || 0) / 60),
+          hrAvg: a.average_heartrate ? Math.round(a.average_heartrate) : null,
+          hrMax: a.max_heartrate ? Math.round(a.max_heartrate) : null,
+          date: (a.start_date_local || a.start_date || "").split("T")[0],
+        })),
       }),
     };
   }
