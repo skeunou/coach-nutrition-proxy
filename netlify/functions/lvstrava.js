@@ -92,5 +92,35 @@ exports.handler = async (event) => {
     };
   }
 
+  // 5) Act — détail d'une activité (splits par km) pour l'analyse dérive
+  if (action === "act" && q.token && q.id) {
+    const r = await getJSON("www.strava.com", "/api/v3/activities/" + encodeURIComponent(q.id) + "?include_all_efforts=false", q.token);
+    const a = r.json;
+    if (!a || a.errors || a.message) {
+      return { statusCode: 200, headers: h, body: JSON.stringify({ error: (a && a.message) || "no_act" }) };
+    }
+    return {
+      statusCode: 200, headers: h,
+      body: JSON.stringify({
+        id: a.id,
+        name: a.name || "",
+        type: a.sport_type || a.type || "",
+        temp: (typeof a.average_temp === "number") ? a.average_temp : null,
+        hrAvg: a.average_heartrate ? Math.round(a.average_heartrate) : null,
+        hrMax: a.max_heartrate ? Math.round(a.max_heartrate) : null,
+        movingMin: Math.round((a.moving_time || 0) / 60),
+        dplus: Math.round(a.total_elevation_gain || 0),
+        km: +(a.distance / 1000).toFixed(2),
+        splits: (a.splits_metric || []).map((s) => ({
+          d: Math.round(s.distance || 0),
+          sec: s.moving_time || s.elapsed_time || 0,
+          hr: s.average_heartrate ? Math.round(s.average_heartrate) : null,
+          elev: Math.round(s.elevation_difference || 0),
+          spd: s.average_speed || 0,
+        })),
+      }),
+    };
+  }
+
   return { statusCode: 400, headers: h, body: JSON.stringify({ error: "Invalid action" }) };
 };
