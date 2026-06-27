@@ -92,13 +92,48 @@ exports.handler = async (event) => {
     };
   }
 
-  // 5) Act — détail d'une activité (splits par km) pour l'analyse dérive
+  // 5) Act — détail d'une activité (splits par km + reps de côte) pour l'analyse coach
   if (action === "act" && q.token && q.id) {
-    const r = await getJSON("www.strava.com", "/api/v3/activities/" + encodeURIComponent(q.id) + "?include_all_efforts=false", q.token);
+    const r = await getJSON("www.strava.com", "/api/v3/activities/" + encodeURIComponent(q.id) + "?include_all_efforts=true", q.token);
     const a = r.json;
     if (!a || a.errors || a.message) {
       return { statusCode: 200, headers: h, body: JSON.stringify({ error: (a && a.message) || "no_act" }) };
     }
+
+    // Détection des reps de côte : on regroupe les segment_efforts par segment,
+    // on ne garde que les segments montants (pente moy ≥ 5%) refaits ≥ 3 fois.
+    // On retient le segment le plus répété (tie-break : plus gros dénivelé).
+    const bySeg = {};
+    (a.segment_efforts || []).forEach((e) => {
+      const seg = e.segment || {};
+      const grade = seg.average_grade || 0;
+      if (grade < 5) return; // ignorer plat / descente
+      const climb = (typeof seg.elevation_high === "number" && typeof seg.elevation_low === "number")
+        ? (seg.elevation_high - seg.elevation_low) : 0;
+      const id = seg.id;
+      if (!bySeg[id]) bySeg[id] = { name: seg.name || "Côte", climb: Math.round(climb), dist: Math.round(seg.distance || 0), efforts: [] };
+      bySeg[id].efforts.push({
+        t: e.start_date || e.start_date_local || "",
+        sec: e.moving_time || e.elapsed_time || 0,
+        w: e.average_watts ? Math.round(e.average_watts) : null,
+        cad: e.average_cadence ? Math.round(e.average_cadence * 2) : null, // ×2 → pas/min
+        hr: e.average_heartrate ? Math.round(e.average_heartrate) : null,
+      });
+    });
+    let best = null;
+    Object.keys(bySeg).forEach((id) => {
+      const s = bySeg[id];
+      if (s.efforts.length < 3) return;
+      if (!best || s.efforts.length > best.efforts.length ||
+         (s.efforts.length === best.efforts.length && s.climb > best.climb)) best = s;
+    });
+    let reps = null;
+    if (best) {
+      best.efforts.sort((x, y) => Date.parse(x.t) - Date.parse(y.t));
+      reps = { name: best.name, climb: best.climb, dist: best.dist,
+        list: best.efforts.map((e) => ({ sec: e.sec, w: e.w, cad: e.cad, hr: e.hr })) };
+    }
+
     return {
       statusCode: 200, headers: h,
       body: JSON.stringify({
@@ -108,9 +143,11 @@ exports.handler = async (event) => {
         temp: (typeof a.average_temp === "number") ? a.average_temp : null,
         hrAvg: a.average_heartrate ? Math.round(a.average_heartrate) : null,
         hrMax: a.max_heartrate ? Math.round(a.max_heartrate) : null,
+        wAvg: a.average_watts ? Math.round(a.average_watts) : null,
         movingMin: Math.round((a.moving_time || 0) / 60),
         dplus: Math.round(a.total_elevation_gain || 0),
         km: +(a.distance / 1000).toFixed(2),
+        reps: reps,
         splits: (a.splits_metric || []).map((s) => ({
           d: Math.round(s.distance || 0),
           sec: s.moving_time || s.elapsed_time || 0,
