@@ -61,7 +61,7 @@ exports.handler = async (event) => {
   // 4) Data — cumul de la semaine + dernières activités
   if (action === "data" && q.token) {
     const ws = parseInt(q.weekStart || "0");
-    const r = await getJSON("www.strava.com", "/api/v3/athlete/activities?per_page=30", q.token);
+    const r = await getJSON("www.strava.com", "/api/v3/athlete/activities?per_page=60", q.token);
     const acts = r.json;
     if (!Array.isArray(acts)) {
       return { statusCode: 200, headers: h, body: JSON.stringify({ error: (acts && acts.message) || "no_data", detail: acts }) };
