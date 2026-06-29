@@ -31,9 +31,9 @@ function statePath(user) { return "state-" + user + ".json"; }
 
 async function readState(user, token) {
   const r = await gh("GET", "/repos/" + REPO + "/contents/" + statePath(user), token);
-  if (r.status === 404) return { sha: "", state: { log: [], links: {}, rev: 0 } };
+  if (r.status === 404) return { sha: "", state: { log: [], links: {}, extras: [], rev: 0 } };
   if (r.status === 200 && r.json && r.json.content) {
-    let state = { log: [], links: {}, rev: 0 };
+    let state = { log: [], links: {}, extras: [], rev: 0 };
     try { state = JSON.parse(Buffer.from(r.json.content, "base64").toString("utf8")); } catch (e) {}
     return { sha: r.json.sha || "", state };
   }
@@ -83,6 +83,7 @@ exports.handler = async (event) => {
       const state = {
         log: Array.isArray(inc.log) ? inc.log : [],
         links: (inc.links && typeof inc.links === "object") ? inc.links : {},
+        extras: Array.isArray(inc.extras) ? inc.extras : ((cur.state && cur.state.extras) || []),
         rev: ((cur.state && cur.state.rev) || 0) + 1,
         updated: Date.now(),
       };
@@ -93,7 +94,7 @@ exports.handler = async (event) => {
         w = await writeState(user, token, state, cur.sha);
       }
       const ok = w.status === 200 || w.status === 201;
-      return { statusCode: 200, headers: h, body: JSON.stringify({ ok: ok, rev: state.rev, count: state.log.length, links: Object.keys(state.links).length, status: w.status }) };
+      return { statusCode: 200, headers: h, body: JSON.stringify({ ok: ok, rev: state.rev, count: state.log.length, links: Object.keys(state.links).length, extras: state.extras.length, status: w.status }) };
     }
 
     return { statusCode: 400, headers: h, body: JSON.stringify({ error: "invalid_action" }) };
