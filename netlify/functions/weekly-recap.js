@@ -80,6 +80,16 @@ async function fetchLog() {
 }
 
 /* ---------- Agrégation de la semaine ---------- */
+// Classification par préfixe du titre Strava (convention Laurent). null si non préfixé.
+function actSport(a) {
+  const n = (a.name || "").trim();
+  if (/^hiit\s*-/i.test(n)) return "hiit";
+  if (/^h\.?\s*t\s*-/i.test(n)) return "velo_ht";
+  if (/^vdr\s*-/i.test(n)) return "velo_route";
+  if (/^t\s*-/i.test(n)) return "trail";
+  if (/^r\s*-/i.test(n)) return "course";
+  return null;
+}
 function buildFacts(acts, log, monStr, sunStr) {
   function inWk(s) { s = (s || "").slice(0, 10); return s >= monStr && s <= sunStr; }
   const F = { mon: monStr, sun: sunStr, runKm: 0, runD: 0, runN: 0, rideKm: 0, rideD: 0, rideN: 0, totMin: 0, n: 0, efTot: 0, efZ2: 0, hi: 0, longKm: 0, dPlusTot: 0 };
@@ -89,12 +99,15 @@ function buildFacts(acts, log, monStr, sunStr) {
     const t = (a.sport_type || a.type || "").toLowerCase();
     const km = (a.distance || 0) / 1000, dp = a.total_elevation_gain || 0, mn = (a.moving_time || 0) / 60;
     const hr = a.average_heartrate ? Math.round(a.average_heartrate) : null;
+    const sp = actSport(a);
+    const isRun = sp ? (sp === "trail" || sp === "course") : /run/.test(t);
+    const isRide = sp ? (sp === "velo_ht" || sp === "velo_route") : /ride/.test(t);
     F.totMin += mn; F.n++; F.dPlusTot += dp;
-    if (/run/.test(t)) {
+    if (isRun) {
       F.runKm += km; F.runD += dp; F.runN++;
       if (km > F.longKm) F.longKm = km;
       if (hr) { F.efTot++; if (hr <= Z2HI) F.efZ2++; if (hr >= Z4LO) F.hi++; }
-    } else if (/ride/.test(t)) { F.rideKm += km; F.rideD += dp; F.rideN++; }
+    } else if (isRide) { F.rideKm += km; F.rideD += dp; F.rideN++; }
   });
   // ressentis (log validé) sur la semaine
   const wk = log.filter((e) => inWk(e.dateKey));
