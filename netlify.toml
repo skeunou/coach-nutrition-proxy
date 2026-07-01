@@ -7,3 +7,6 @@
 
 [functions."weekly-recap"]
   schedule = "0 17,18 * * 0"
+
+[functions."daily-push"]
+  schedule = "0 4,5 * * *"
