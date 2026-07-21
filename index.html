@@ -91,6 +91,13 @@
   .sumcard{background:var(--surf);border:1px solid rgba(232,255,71,.3);border-radius:10px;padding:14px;margin-bottom:12px}
   .suml{font-family:'Bebas Neue',sans-serif;font-size:11px;letter-spacing:2px;color:var(--mut);margin-bottom:6px}
   .sumt{font-size:12px;color:#c8c8c8;line-height:1.7}
+  .rch{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px}
+  .rcn{font-family:'Bebas Neue',sans-serif;font-size:19px;letter-spacing:.5px;color:var(--txt);line-height:1.1}
+  .favb{flex-shrink:0;padding:5px 10px;background:var(--surf2);border:1px solid var(--bdr);border-radius:6px;font-size:15px;cursor:pointer;line-height:1;color:var(--mut)}
+  .favb.on{border-color:var(--acc);background:rgba(232,255,71,.1);color:var(--acc)}
+  .ring{padding-left:16px;margin-bottom:6px}
+  .ring li{font-size:12px;color:var(--txt);line-height:1.6;margin-bottom:2px}
+  .rmeth{font-size:12px;color:#c8c8c8;line-height:1.6;margin:6px 0}
 </style>
 </head>
 <body>
@@ -108,6 +115,7 @@
     <button class="tab-btn active" data-tab="config">Config</button>
     <button class="tab-btn" data-tab="plan">Plan</button>
     <button class="tab-btn" data-tab="courses">Courses</button>
+    <button class="tab-btn" data-tab="cuisine">Cuisine</button>
     <button class="tab-btn" data-tab="journal">Journal</button>
   </div>
 </div>
@@ -179,6 +187,32 @@
 
   <div class="tab-pane" id="tab-courses">
     <div id="courses-c"><div class="empty"><div class="empty-i">🛒</div><div class="empty-t">Liste vide</div></div></div>
+  </div>
+
+  <div class="tab-pane" id="tab-cuisine">
+    <div class="card acc">
+      <div class="lbl">Assistant cuisine</div>
+      <div class="fg">
+        <label class="flbl">Type d'aide</label>
+        <div class="bg" id="cui-g">
+          <button class="tbtn on" data-v="sauce">🧂 Assaisonnement / sauce</button>
+          <button class="tbtn" data-v="recette">🍳 Recette avec mes ingrédients</button>
+          <button class="tbtn" data-v="accomp">🥗 Idée d'accompagnement</button>
+        </div>
+      </div>
+      <div class="fg">
+        <label class="flbl">Ce que tu as sous la main</label>
+        <textarea id="cui-in" placeholder="Ex: salade tomate, concombre, chèvre, menthe — quel assaisonnement ?"></textarea>
+      </div>
+      <div id="cui-err"></div>
+      <button class="btn-p" id="cui-btn" onclick="askCuisine()">Demander une idée</button>
+    </div>
+    <div id="cui-res"></div>
+    <div class="card" style="margin-top:4px;margin-bottom:10px">
+      <div class="lbl" style="margin-bottom:6px">⭐ Mes favoris</div>
+      <div style="font-size:12px;color:var(--mut)">Sauvegardés sur cet appareil.</div>
+    </div>
+    <div id="fav-c"></div>
   </div>
 
   <div class="tab-pane" id="tab-journal">
@@ -515,7 +549,140 @@ async function delE(id){
   await saveHist();renderJournal();
 }
 
+/* ===== ASSISTANT CUISINE (assaisonnements / recettes / accompagnements) ===== */
+const FAV_KEY="cuisine:favs:v1";
+let favs=[], lastCuisineOpts=[], cuisineIntent="sauce";
+
+function escH(s){return String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+
+function loadFavs(){
+  try{const r=localStorage.getItem(FAV_KEY);if(r){const p=JSON.parse(r);if(Array.isArray(p))favs=p;}}
+  catch(e){console.warn("loadFavs échec:",e);}
+  renderFavs();
+}
+function saveFavs(){
+  try{localStorage.setItem(FAV_KEY,JSON.stringify(favs));return true;}
+  catch(e){console.warn("saveFavs échec:",e);alert("⚠️ Favori non sauvegardé (stockage plein ou navigation privée).");return false;}
+}
+
+// chips d'intention (single select)
+document.querySelectorAll("#cui-g .tbtn").forEach(b=>b.addEventListener("click",()=>{
+  cuisineIntent=b.dataset.v;
+  document.querySelectorAll("#cui-g .tbtn").forEach(x=>x.className="tbtn");
+  b.className="tbtn on";
+}));
+
+function buildCuisinePrompt(intent,text){
+  const INTENT={
+    sauce:"Propose 2 à 3 ASSAISONNEMENTS / SAUCES / VINAIGRETTES qui subliment ce plat ou ces ingrédients. Chacun dans un registre différent (ex: acidulé, crémeux, herbacé, relevé).",
+    recette:"Propose 2 à 3 IDÉES DE RECETTES rapides et distinctes à partir de ces ingrédients (nom évocateur, réalisables vite).",
+    accomp:"Propose 2 à 3 IDÉES D'ACCOMPAGNEMENT distinctes qui complètent bien ce plat."
+  };
+  return `Tu es un chef-coach neuro-nutrition (orienté trail/récup) mais PRATIQUE, rapide et gourmand. ${INTENT[intent]||INTENT.sauce}
+Ce que l'utilisateur a sous la main : "${text}".
+Contraintes : ingrédients courants, prépa courte. Quantités PRÉCISES et réalistes. Méthode ULTRA concise. Pas de blabla.
+Réponds en JSON STRICT sans markdown, rien d'autre :
+{"options":[{"name":"Nom court évocateur","ingredients":["quantité + ingrédient","..."],"method":"1 à 3 phrases max","note":"micro-note nutri 3-6 mots ou null"}]}`;
+}
+
+async function askCuisine(){
+  const text=document.getElementById("cui-in").value.trim();
+  const errEl=document.getElementById("cui-err");
+  errEl.innerHTML="";
+  if(!text){errEl.innerHTML='<div class="errbox">Décris d\'abord ce que tu as sous la main.</div>';return;}
+  document.getElementById("lov").classList.add("on");
+  const btn=document.getElementById("cui-btn");btn.disabled=true;
+  let lastErr=null;
+  try{
+    for(let attempt=0;attempt<2;attempt++){
+      try{
+        const resp=await fetch("/.netlify/functions/generate",{
+          method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({model:"claude-haiku-4-5",max_tokens:1400,messages:[{role:"user",content:buildCuisinePrompt(cuisineIntent,text)}]})
+        });
+        const raw=await resp.text();
+        let data;try{data=JSON.parse(raw);}catch(e){throw new Error("Réponse invalide ("+resp.status+")");}
+        if(!resp.ok) throw new Error("HTTP "+resp.status+": "+(data.error?.message||raw.slice(0,120)));
+        const txt=data.content.map(i=>i.text||"").join("");
+        const parsed=parsePlanJSON(txt);
+        const opts=(parsed.options||[]).filter(o=>o&&o.name);
+        if(!opts.length) throw new Error("Aucune idée exploitable, réessaie.");
+        opts.forEach(o=>o.query=text);
+        renderCuisineResults(opts);
+        lastErr=null;break;
+      }catch(e){lastErr=e;}
+    }
+    if(lastErr) throw lastErr;
+  }catch(e){
+    errEl.innerHTML=`<div class="errbox">${escH(e.message)}</div>`;
+  }
+  document.getElementById("lov").classList.remove("on");
+  btn.disabled=false;
+}
+
+function isFav(o){return favs.some(f=>f.name===o.name && f.method===(o.method||""));}
+
+function renderCuisineResults(opts){
+  lastCuisineOpts=opts;
+  const c=document.getElementById("cui-res");
+  if(!opts.length){c.innerHTML="";return;}
+  c.innerHTML=opts.map((o,i)=>{
+    const ings=(o.ingredients||[]).map(x=>`<li>${escH(x)}</li>`).join("");
+    const note=(o.note&&o.note!=="null")?`<div class="mn">${escH(o.note)}</div>`:"";
+    const on=isFav(o);
+    return `<div class="card">
+      <div class="rch">
+        <div class="rcn">${escH(o.name||"Idée")}</div>
+        <button class="favb${on?' on':''}" onclick="toggleFav(${i})">${on?'★':'☆'}</button>
+      </div>
+      ${ings?`<ul class="ring">${ings}</ul>`:""}
+      ${o.method?`<div class="rmeth">${escH(o.method)}</div>`:""}
+      ${note}
+    </div>`;
+  }).join("");
+}
+
+function toggleFav(i){
+  const o=lastCuisineOpts[i];if(!o)return;
+  const idx=favs.findIndex(f=>f.name===o.name && f.method===(o.method||""));
+  if(idx>=0){favs.splice(idx,1);}
+  else{
+    favs.unshift({id:Date.now()+"-"+i,intent:cuisineIntent,query:o.query||"",name:o.name||"Idée",
+      ingredients:o.ingredients||[],method:o.method||"",note:(o.note&&o.note!=="null")?o.note:"",savedAt:new Date().toISOString()});
+    if(favs.length>50)favs=favs.slice(0,50);
+  }
+  saveFavs();
+  renderCuisineResults(lastCuisineOpts);
+  renderFavs();
+}
+
+function renderFavs(){
+  const c=document.getElementById("fav-c");
+  if(!c)return;
+  if(!favs.length){c.innerHTML='<div class="empty" style="padding:24px"><div class="empty-i">⭐</div><div class="empty-t">Aucun favori</div></div>';return;}
+  c.innerHTML=favs.map(f=>{
+    const ings=(f.ingredients||[]).map(x=>`<li>${escH(x)}</li>`).join("");
+    const note=f.note?`<div class="mn">${escH(f.note)}</div>`:"";
+    return `<div class="card">
+      <div class="rch">
+        <div class="rcn">${escH(f.name)}</div>
+        <button class="bdel" onclick="delFav('${f.id}')">Retirer</button>
+      </div>
+      ${ings?`<ul class="ring">${ings}</ul>`:""}
+      ${f.method?`<div class="rmeth">${escH(f.method)}</div>`:""}
+      ${note}
+    </div>`;
+  }).join("");
+}
+
+function delFav(id){
+  favs=favs.filter(f=>f.id!==id);
+  saveFavs();renderFavs();
+  if(lastCuisineOpts.length) renderCuisineResults(lastCuisineOpts);
+}
+/* ===== FIN ASSISTANT CUISINE ===== */
 loadHist();
+loadFavs();
 </script>
 </body>
 </html>
