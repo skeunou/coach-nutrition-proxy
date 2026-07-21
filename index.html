@@ -204,11 +204,23 @@ const TAGCLS={"post-effort":"tp","pre-effort":"tpr","charge-glucidique":"tg","r�
 let cfg={ctx:"charge",days:3,fmt:"solo",ete:false,prot:false,vege:false,gluten:false};
 let plan=null,hist=[];
 
-async function loadHist(){
-  try{const h=await window.storage.get(HIST_KEY);if(h)hist=JSON.parse(h.value);}catch(e){}
+function loadHist(){
+  try{
+    const raw=localStorage.getItem(HIST_KEY);
+    if(raw){const parsed=JSON.parse(raw);if(Array.isArray(parsed))hist=parsed;}
+  }catch(e){console.warn("loadHist échec:",e);}
   renderJournal();
 }
-async function saveHist(){try{await window.storage.set(HIST_KEY,JSON.stringify(hist));}catch(e){}}
+function saveHist(){
+  try{
+    localStorage.setItem(HIST_KEY,JSON.stringify(hist));
+    return true;
+  }catch(e){
+    console.warn("saveHist échec:",e);
+    alert("⚠️ Sauvegarde impossible sur cet appareil (stockage plein ou navigation privée). Le plan ne sera pas conservé.");
+    return false;
+  }
+}
 
 // Tabs
 document.querySelectorAll(".tab-btn").forEach(b=>b.addEventListener("click",()=>{
