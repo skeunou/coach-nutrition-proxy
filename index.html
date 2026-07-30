@@ -99,6 +99,80 @@
   .ring li{font-size:12px;color:var(--txt);line-height:1.6;margin-bottom:2px}
   .rmeth{font-size:12px;color:#c8c8c8;line-height:1.6;margin:6px 0}
 </style>
+<script>
+/* LV TOOL — lvnav.js — mémoire de navigation commune
+   Usage :
+     LVNAV.init({ app:"mon-app", snapshot:function(){return {...}}, restore:function(s){} });
+     LVNAV.push()    -> nouvelle vue (bouton retour Android remonte d'un cran)
+     LVNAV.replace() -> même vue, état mis à jour
+     LVNAV.back()    -> retour arrière (à câbler sur les boutons "← Retour")
+     LVNAV.save()    -> sauvegarde immédiate
+   Survit au rechargement d'onglet (Chrome Android tue les onglets en arrière-plan).
+*/
+(function () {
+  if (window.LVNAV) return;
+  var C = null, KEY = null, TTL = 6 * 3600 * 1000, ready = false, tick = null;
+
+  function store(s) {
+    try {
+      localStorage.setItem(KEY, JSON.stringify({
+        t: Date.now(), s: s, y: window.scrollY || window.pageYOffset || 0
+      }));
+    } catch (e) {}
+  }
+  function read() {
+    try {
+      var p = JSON.parse(localStorage.getItem(KEY));
+      if (!p || !p.t) return null;
+      if (Date.now() - p.t > TTL) { localStorage.removeItem(KEY); return null; }
+      return p;
+    } catch (e) { return null; }
+  }
+
+  var LVNAV = {
+    init: function (o) {
+      C = o;
+      KEY = "lvnav:" + o.app + ":v1";
+      if (o.ttl) TTL = o.ttl;
+      var boot = function () {
+        var p = read();
+        if (p && p.s) {
+          try { C.restore(p.s); } catch (e) {}
+          if (p.y) setTimeout(function () { window.scrollTo(0, p.y); }, 80);
+        }
+        try { history.replaceState({ lv: C.snapshot() }, ""); } catch (e) {}
+        ready = true;
+      };
+      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+      else boot();
+
+      window.addEventListener("popstate", function (ev) {
+        if (!ev.state || !ev.state.lv) return;
+        try { C.restore(ev.state.lv); } catch (e) {}
+        store(ev.state.lv);
+      });
+      document.addEventListener("visibilitychange", function () {
+        if (document.visibilityState === "hidden") LVNAV.save();
+      });
+      window.addEventListener("pagehide", function () { LVNAV.save(); });
+      if (tick) clearInterval(tick);
+      tick = setInterval(function () { if (ready) LVNAV.save(); }, 4000);
+    },
+    save: function () { if (!C || !ready) return; try { store(C.snapshot()); } catch (e) {} },
+    push: function () {
+      if (!C || !ready) return;
+      try { var s = C.snapshot(); history.pushState({ lv: s }, ""); store(s); } catch (e) {}
+    },
+    replace: function () {
+      if (!C || !ready) return;
+      try { var s = C.snapshot(); history.replaceState({ lv: s }, ""); store(s); } catch (e) {}
+    },
+    back: function () { try { history.back(); } catch (e) {} },
+    clear: function () { try { localStorage.removeItem(KEY); } catch (e) {} }
+  };
+  window.LVNAV = LVNAV;
+})();
+</script>
 </head>
 <body>
 <div id="lov"><div class="spin"></div><div class="ltxt">Génération en cours...</div></div>
@@ -257,12 +331,32 @@ function saveHist(){
 }
 
 // Tabs
-document.querySelectorAll(".tab-btn").forEach(b=>b.addEventListener("click",()=>{
+function lvSetTab(t){
   document.querySelectorAll(".tab-btn").forEach(x=>x.classList.remove("active"));
   document.querySelectorAll(".tab-pane").forEach(x=>x.classList.remove("active"));
-  b.classList.add("active");
-  document.getElementById("tab-"+b.dataset.tab).classList.add("active");
+  var b=document.querySelector('[data-tab="'+t+'"]'); if(b)b.classList.add("active");
+  var pane=document.getElementById("tab-"+t); if(pane)pane.classList.add("active");
+  lvTab=t;
+}
+document.querySelectorAll(".tab-btn").forEach(b=>b.addEventListener("click",()=>{
+  lvSetTab(b.dataset.tab);
+  if(window.LVNAV)LVNAV.push();
 }));
+
+/* ============ LV : memoire de navigation ============ */
+var lvTab="config", lvRestoring=false;
+if(window.LVNAV){
+  LVNAV.init({
+    app:"coach-nutrition",
+    snapshot:function(){ return {t:lvTab}; },
+    restore:function(s){
+      if(!s||!s.t) return;
+      lvRestoring=true;
+      try{ lvSetTab(s.t); }catch(e){}
+      lvRestoring=false;
+    }
+  });
+}
 
 // Config
 document.querySelectorAll("#ctx-g .tbtn").forEach(b=>b.addEventListener("click",()=>{
