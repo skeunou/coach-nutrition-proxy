@@ -10,3 +10,6 @@
 
 [functions."daily-push"]
   schedule = "0 4,5 * * *"
+
+[functions."daily-session"]
+  schedule = "0 2,3 * * *"
