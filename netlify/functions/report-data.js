@@ -14,6 +14,10 @@ exports.handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return { statusCode: 200, headers: H, body: "" };
   const q = event.queryStringParameters || {};
   if (!process.env.RECAP_KEY || q.key !== process.env.RECAP_KEY) return { statusCode: 401, headers: H, body: JSON.stringify({ status: "unauthorized" }) };
+  if (q.refs === "1") { // repères calibrés (puissance HT…) pour le plan du P.P.L
+    const r = await ST.readJson("coach/refs.json");
+    return { statusCode: 200, headers: H, body: JSON.stringify({ status: r.data ? "ok" : "missing", refs: r.data || null }) };
+  }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(q.date || "")) return { statusCode: 400, headers: H, body: JSON.stringify({ status: "bad_date" }) };
   const r = await ST.readReport(q.date);
   if (r.missing) return { statusCode: 200, headers: H, body: JSON.stringify({ status: "missing", ymd: q.date }) };

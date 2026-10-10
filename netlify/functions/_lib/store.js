@@ -22,6 +22,28 @@ function gh(method, path, bodyObj) {
 }
 const pathOf = (ymd) => "coach/rapport-" + ymd + ".json";
 
+/* Lecture / écriture JSON générique dans lv-data (état de l'app, mémoire du coach, fil de discussion) */
+async function readJson(path) {
+  const r = await gh("GET", `/repos/${REPO}/contents/${path}`);
+  if (r.status === 404) return { missing: true, data: null };
+  if (r.status !== 200 || !r.json) return { error: "lecture lv-data HTTP " + r.status, data: null };
+  let b64 = r.json.content;
+  if (!b64 && r.json.sha) { const b = await gh("GET", `/repos/${REPO}/git/blobs/${r.json.sha}`); b64 = b.json && b.json.content; }
+  try { return { data: JSON.parse(Buffer.from(b64 || "", "base64").toString("utf8")) }; } catch (e) { return { error: "JSON illisible", data: null }; }
+}
+async function writeJson(path, obj, message) {
+  const content = Buffer.from(JSON.stringify(obj)).toString("base64");
+  for (let i = 0; i < 2; i++) {
+    const cur = await gh("GET", `/repos/${REPO}/contents/${path}`);
+    const payload = { message: message || "coach " + path, content };
+    if (cur.status === 200 && cur.json && cur.json.sha) payload.sha = cur.json.sha;
+    const r = await gh("PUT", `/repos/${REPO}/contents/${path}`, payload);
+    if (r.status === 200 || r.status === 201) return { ok: true };
+    if (r.status !== 409) return { ok: false, status: r.status };
+  }
+  return { ok: false, status: 409 };
+}
+
 async function readReport(ymd) {
   const r = await gh("GET", `/repos/${REPO}/contents/${pathOf(ymd)}`);
   if (r.status === 404) return { missing: true };
@@ -46,4 +68,4 @@ async function writeReport(ymd, report) {
   return { ok: false, status: 409 };
 }
 
-module.exports = { readReport, writeReport };
+module.exports = { readReport, writeReport, readJson, writeJson };

@@ -82,6 +82,12 @@ function diagnose(x, hist, intent, note) {
     return C.sort((a, b) => b.p - a.p);
   }
   const H = hist.map((h) => h.m).filter(Boolean);
+  if (x.hrIn && !m.hrSuspect) {
+    const b = x.hrIn.band, lbl = b[0] ? b[0] + "-" + b[1] : "< " + b[1];
+    if (x.hrIn.in < 60) add(x.hrIn.above > x.hrIn.below ? 80 : 55, `Seulement ${x.hrIn.in} % du temps dans ta FC cible (${lbl} bpm) : ${x.hrIn.above > x.hrIn.below ? x.hrIn.above + " % au-dessus, la séance a été plus dure que prévu" : x.hrIn.below + " % en dessous, plus facile que prévu"}.`, x.hrIn.above > x.hrIn.below ? "alerte" : "vigilance");
+    else if (x.hrIn.in >= 85) add(35, `${x.hrIn.in} % du temps dans ta FC cible (${lbl} bpm) : intensité tenue.`, "positif");
+    else add(45, `${x.hrIn.in} % du temps dans ta FC cible (${lbl} bpm), ${x.hrIn.above} % au-dessus.`, "neutre");
+  }
   if (m.hrSuspect) add(95, "FC probablement faussée : sur une bonne partie de la sortie elle colle à ta cadence (artefact classique du capteur au poignet). Zones, découplage et efficacité ne sont pas fiables aujourd'hui.", "alerte");
   const z = m.hrSuspect ? null : (m.zones || null);
   const z12 = z ? z[0] + z[1] : null, z3p = z ? z[2] + z[3] + z[4] : null, z45 = z ? z[3] + z[4] : null;
@@ -100,9 +106,12 @@ function diagnose(x, hist, intent, note) {
     else if (note.rpe <= 4 && z3p >= 40) add(55, `FC haute (${z3p} % en Z3+) mais ressenti bas (${note.rpe}/10) : chaleur, déshydratation, fatigue nerveuse ou mesure au poignet à vérifier.`, "vigilance");
   }
 
-  if (m.kind === "run") {
+  if (m.kind === "run" && x.cls && x.cls.fam === "hike") {
+    // Rando : pas de jugement de cadence de course ; seule la grimpe compte
+    if (m.climb && m.climb.gain >= 80) add(55, `En rando : VAM ${m.climb.vam} m/h sur ${m.climb.gain} m de montée — c'est le rythme de marche en côte qui comptera sur les pentes raides de l'UT4M.`, "neutre");
+  } else if (m.kind === "run") {
     if (m.cadenceFlat && m.cadenceFlat < 168) add(60, `Cadence sur le plat ${m.cadenceFlat} pas/min (repère 170-180) : foulée trop longue, plus de freinage à chaque appui et plus de charge excentrique.`, "vigilance");
-    if (m.climb && m.climb.gain >= 50 && m.climb.cadence) {
+    if (m.climb && m.climb.gain >= 50 && m.climb.cadence && (m.climb.walkPct == null || m.climb.walkPct < 50)) {
       if (m.climb.cadence < 165) add(65, `Cadence en montée ${m.climb.cadence} pas/min (< 165) : tu montes en surrégime, foulée trop ample. Raccourcis et garde le rythme des pieds.`, "vigilance");
       else if (m.cadenceFlat && m.cadenceFlat - m.climb.cadence >= 8) add(50, `La cadence chute de ${m.cadenceFlat - m.climb.cadence} pas/min en montée (${m.cadenceFlat} → ${m.climb.cadence}) : tu allonges au lieu de raccourcir.`, "vigilance");
     }
@@ -178,6 +187,7 @@ const SYS = [
   "- Une erreur se nomme clairement avec sa conséquence. Une réussite se dit en une phrase, sans en rajouter.",
   "- L'UT4M seulement si le lien est concret et propre à ce constat (ex. cadence en montée → 11 700 m D+ ; descente → durabilité sur 4 jours). Sinon n'en parle pas.",
   "- Journée calme sans constat marquant : dis-le en une phrase. Ne remplis jamais.",
+  "- RÉCURRENCES : un défaut marqué DRAPEAU ROUGE (3e fois ou plus en 3 semaines) ouvre ton analyse, sur un ton ferme et sans détour : dis combien de fois tu l'as relevé, que ça devient une habitude, ce que ça coûte, et donne une action corrective NOUVELLE et précise (exercice, repère chiffré, routine). Une 2e occurrence se mentionne simplement (« deuxième fois cette semaine »).",
   "- « demain » = UNE consigne exécutable : quoi faire, à quelle intensité (zones, FC, cadence fournies), et la règle d'arrêt si le pubis est concerné.",
   "  · VEILLE DE COURSE : brief de course — départ retenu, plafond de FC ou de zone pour la 1re montée, gestion des descentes vu le pubis, règle d'arrêt (ex. ZP qui monte), et ce qu'il devra noter après la course.",
   "  · LENDEMAIN DE COURSE : récupération et ce qu'il doit surveiller (ZP au réveil, jambes).",
@@ -200,6 +210,10 @@ function userPrompt(ctx) {
   L.push(ctx.plan ? `PLAN DU JOUR : ${strip(ctx.plan.label)}${ctx.plan.sub ? " — " + strip(ctx.plan.sub) : ""}${ctx.plan.block ? " (bloc : " + ctx.plan.block + ")" : ""}.` : "PLAN DU JOUR : indisponible.");
   L.push(ctx.tomorrow ? `PLAN DE DEMAIN : ${strip(ctx.tomorrow.label)}${ctx.tomorrow.sub ? " — " + strip(ctx.tomorrow.sub) : ""}.` + (ctx.tomorrow.detail && ctx.tomorrow.detail.length ? " Détail : " + ctx.tomorrow.detail.slice(0, 4).map(strip).join(" | ") : "") : "PLAN DE DEMAIN : indisponible.");
   if (ctx.special && ctx.special.length) L.push("CONTEXTE SPÉCIAL : " + ctx.special.join(" "));
+  if (ctx.recur && ctx.recur.length) {
+    const sd = (d) => { const p = d.split("-").map(Number); return p[2] + "/" + p[1]; };
+    L.push("RÉCURRENCES (défauts déjà relevés sur 21 jours, ce jour compris) :\n" + ctx.recur.map((r) => `- ${r.label} : ${r.count}e fois (${r.dates.map(sd).join(", ")})${r.count >= 3 ? " → DRAPEAU ROUGE" : ""}`).join("\n"));
+  }
   L.push("3 DERNIERS JOURS (intensité mesurée par la FC moyenne) :" + (ctx.last3.length ? "\n- " + ctx.last3.join("\n- ") : " aucune activité enregistrée."));
   L.push(`SEMAINE EN COURS : ${ctx.week.km} km course/trail, ${ctx.week.dp} m D+, ${ctx.week.ride} min de vélo` + (ctx.week.tg && ctx.week.tg.km ? ` (cible plan ${ctx.week.tg.km} km / ${ctx.week.tg.dp} m D+).` : "."));
   ctx.items.forEach((x) => {
@@ -221,11 +235,45 @@ function fallbackReport(ctx, why) {
   const main = ctx.items.filter((x) => x.m);
   const d = [].concat(...main.map((x) => x.diag)).sort((a, b) => b.p - a.p);
   const passe = main.map((x) => `${x.a.name} : ${x.m.kind === "run" ? x.m.km + " km, " + x.m.dPlus + " m D+, FC moyenne " + (x.m.hr || "—") : x.m.movingMin + " min de vélo, cadence " + x.m.cadence + ", FC moyenne " + (x.m.hr || "—")}${x.intent ? " (" + INTENT_LBL[x.intent] + ")" : ""}.`).join(" ");
-  const sens = d.slice(0, 3).map((c) => c.t).join(" ") || "Pas de constat marquant aujourd'hui.";
+  const red = (ctx.recur || []).filter((r) => r.count >= 3);
+  const sens = (red.length ? red.map((r) => `Drapeau rouge : « ${r.label} », ${r.count}e fois en 3 semaines. Ça devient une habitude, il faut la corriger.`).join(" ") + " " : "") + (d.slice(0, 3).map((c) => c.t).join(" ") || "Pas de constat marquant aujourd'hui.");
   let demain = ctx.tomorrow && ctx.tomorrow.label ? `${strip(ctx.tomorrow.label)}${ctx.tomorrow.sub ? " — " + strip(ctx.tomorrow.sub) : ""}.` : "Pas de séance lue dans le plan.";
   if (d.some((c) => /^Pubis à ([4-9]|10)/.test(c.t))) demain = "Pubis en alerte : ni course ni côtes demain. " + demain + " Seulement si le pubis est ≤ 2/10 au réveil.";
   else if (d.some((c) => /trop intense|zone « grise »/.test(c.t))) demain += " Garde la FC sous 143 bpm sur tout ce qui est facile.";
   return { titre: d[0] && d[0].tone === "alerte" ? "Point de vigilance du jour" : "Les constats du jour", passe, sens, demain, src: "calc", note: why };
+}
+
+/* ---------- Récurrences (mémoire du coach) ----------
+   Chaque constat négatif reçoit une clé stable. On compte ses apparitions sur
+   21 jours : à partir de 3, le coach change de registre (drapeau rouge). */
+const RECUR = [
+  ["pubis", "Douleur pubienne pendant la séance", (t) => /^Pubis à ([2-9]|10)/.test(t)],
+  ["intensite", "Séance plus dure que prévu", (t) => /trop intense|zone « grise »|au-dessus de 143 bpm sur du vélo|plus dure que prévu/.test(t)],
+  ["fc_cible", "FC hors de la cible de la séance", (t) => /Seulement .* dans ta FC cible/.test(t)],
+  ["cad_plat", "Cadence trop basse sur le plat", (t) => /^Cadence sur le plat/.test(t)],
+  ["cad_montee", "Cadence trop basse en montée", (t) => /^Cadence en montée|chute de .* en montée/.test(t)],
+  ["decouplage", "Dérive cardiaque en 2e moitié", (t) => /^Découplage .*(dérive modérée|nettement dérivé)/.test(t)],
+  ["depart", "2e moitié qui s'effondre (départ trop rapide)", (t) => /^2e moitié .* plus lente/.test(t)],
+  ["cad_velo", "Consigne de cadence vélo non tenue", (t) => /consigne de cadence n'est pas tenue/.test(t)],
+  ["puissance", "Consigne de puissance non tenue", (t) => /cible de puissance/.test(t) && /^Seulement/.test(t)],
+  ["cad_irreg", "Pédalage irrégulier", (t) => /Cadence très dispersée/.test(t)],
+  ["rpe", "Ressenti trop élevé pour une séance facile", (t) => /^Ressenti .* censée être facile/.test(t)],
+  ["efficacite", "Efficacité aérobie en baisse", (t) => /moins de vitesse pour le même cœur|le cœur travaille plus pour la même puissance/.test(t)],
+];
+const RECUR_LBL = Object.fromEntries(RECUR.map(([k, l]) => [k, l]));
+function recurKeys(diag) {
+  const out = new Set();
+  (diag || []).forEach((c) => { if (c.tone !== "alerte" && c.tone !== "vigilance") return; RECUR.forEach(([k, , f]) => { if (f(c.t)) out.add(k); }); });
+  return [...out];
+}
+/* mem = { byDay: { "AAAA-MM-JJ": [clés] } } → récurrences des clés du jour sur 21 jours (jour inclus) */
+function recurrences(mem, ymd, todayKeys) {
+  const by = (mem && mem.byDay) || {};
+  const from = new Date(Date.parse(ymd + "T12:00:00Z") - 20 * 864e5).toISOString().slice(0, 10);
+  return todayKeys.map((k) => {
+    const dates = Object.keys(by).filter((d) => d >= from && d < ymd && (by[d] || []).includes(k)).sort().concat([ymd]);
+    return { key: k, label: RECUR_LBL[k], count: dates.length, dates };
+  }).filter((r) => r.count >= 2).sort((a, b) => b.count - a.count);
 }
 
 /* ---------- Contrôle de la réponse IA ----------
@@ -245,4 +293,4 @@ function checkReply(j, sourceText) {
   return null;
 }
 
-module.exports = { parseNote, intentOf, diagnose, SYS, userPrompt, fallbackReport, checkReply, INTENT_LBL, VAM_TARGET };
+module.exports = { parseNote, intentOf, diagnose, SYS, userPrompt, fallbackReport, checkReply, recurKeys, recurrences, RECUR_LBL, INTENT_LBL, VAM_TARGET };

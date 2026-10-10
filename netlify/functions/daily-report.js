@@ -127,6 +127,7 @@ function factsFor(x, hist) {
   const med = (k) => median(H.map((h) => k(h)));
   const cmp = (label, v, mv, unit, dec) => v == null ? null : `${label} : ${v}${unit}` + (mv != null ? ` (médiane des ${H.length} dernières comparables : ${dec != null ? (+mv).toFixed(dec) : Math.round(mv)}${unit})` : "");
   const push = (s) => { if (s) L.push(s); };
+  if (x.hrIn) L.push(`Cible FC de la séance : ${x.hrIn.band[0] ? x.hrIn.band[0] + "-" + x.hrIn.band[1] : "< " + x.hrIn.band[1]} bpm → ${x.hrIn.in} % du temps dans la cible, ${x.hrIn.above} % au-dessus, ${x.hrIn.below} % en dessous.`);
   if (m.kind === "run") {
     L.push(`${m.km} km en ${m.movingMin} min de mouvement, ${m.dPlus} m D+. Allure réelle ${m.pace}/km, allure ajustée à la pente (VAP) ${m.gapPace}/km.`);
     push(cmp("FC moyenne", m.hr, med((h) => h.hr), " bpm"));
@@ -140,7 +141,7 @@ function factsFor(x, hist) {
     if (m.climb) {
       L.push(`Montées (pente ≥ 4 %) : ${m.climb.n} segment(s), ${m.climb.gain} m gravis en ${m.climb.min} min → VAM ${m.climb.vam} m/h` +
         (med((h) => h.climb && h.climb.gain >= 80 ? h.climb.vam : null) != null ? ` (médiane dernières sorties avec ≥80 m de montée : ${Math.round(med((h) => h.climb && h.climb.gain >= 80 ? h.climb.vam : null))} m/h)` : "") +
-        `. Cadence en montée ${m.climb.cadence || "—"} pas/min, FC en montée ${m.climb.hr || "—"} bpm.` +
+        `. Cadence en montée (parties courues) ${m.climb.cadence || "—"} pas/min${m.climb.walkPct != null ? ", " + m.climb.walkPct + " % du temps de montée en marche" : ""}, FC en montée ${m.climb.hr || "—"} bpm.` +
         (m.climb.best ? ` Plus grosse montée : ${m.climb.best.gain} m en ${m.climb.best.min} min (VAM ${m.climb.best.vam} m/h, cadence ${m.climb.best.cadence || "—"}).` : ""));
       if (m.climb.gain < 80) L.push("Montées courtes : VAM peu représentative, à commenter avec prudence.");
     }
@@ -236,8 +237,10 @@ function kpis(x) {
   const { m, a } = x;
   if (!m) return [["Durée", Math.round((a.moving_time || 0) / 60) + " min"]].concat(a.average_heartrate ? [["FC moy", Math.round(a.average_heartrate) + ""]] : [], a.max_heartrate ? [["FC max", Math.round(a.max_heartrate) + ""]] : [], x.note && x.note.rpe != null ? [["RPE", x.note.rpe + "/10"]] : []);
   const easy = ["easy", "recovery", "long"].includes(x.intent), z12 = m.zones ? m.zones[0] + m.zones[1] : null;
-  if (m.kind === "run") return [["Distance", m.km + " km"], ["D+", m.dPlus + " m"], ["Allure VAP", m.gapPace], ["FC moy", (m.hr || "—") + "", easy ? SC.S.easyShare(z12) : null], ["Cadence", (m.cadence || "—") + "", SC.S.runCadence(m.cadence)], m.climb && m.climb.gain >= 50 ? ["VAM", m.climb.vam + "", SC.S.vam(m.climb.vam, VAM_TARGET)] : ["Découpl.", m.decouplingValid ? m.decoupling + "%" : "—", m.decouplingValid ? SC.S.decoupling(m.decoupling) : null]];
-  return [["Durée", m.movingMin + " min"], ["Cadence", m.cadence + "", m.target ? SC.S.rideCadence(m.cadence, m.target) : null], [m.target ? "Dans cible" : "Écart-type", m.target ? m.inTarget + "%" : "±" + m.cadenceSd, m.target ? SC.S.inTarget(m.inTarget) : null], ["FC moy", (m.hr || "—") + "", easy ? SC.S.easyShare(z12) : null]]
+  const hb = x.hrIn, fcLbl = hb ? "FC moy · cible " + (hb.band[0] ? hb.band[0] + "-" + hb.band[1] : "< " + hb.band[1]) : "FC moy";
+  const fcScore = hb ? SC.S.inTarget(hb.in) : (easy ? SC.S.easyShare(z12) : null);
+  if (m.kind === "run") return [["Distance", m.km + " km"], ["D+", m.dPlus + " m"], ["Allure VAP", m.gapPace], [fcLbl, (m.hr || "—") + "", fcScore], ["Cadence", (m.cadence || "—") + "", SC.S.runCadence(m.cadence)], m.climb && m.climb.gain >= 50 ? ["VAM", m.climb.vam + "", SC.S.vam(m.climb.vam, VAM_TARGET)] : ["Découpl.", m.decouplingValid ? m.decoupling + "%" : "—", m.decouplingValid ? SC.S.decoupling(m.decoupling) : null]];
+  return [["Durée", m.movingMin + " min"], ["Cadence", m.cadence + "", m.target ? SC.S.rideCadence(m.cadence, m.target) : null], [m.target ? "Dans cible" : "Écart-type", m.target ? m.inTarget + "%" : "±" + m.cadenceSd, m.target ? SC.S.inTarget(m.inTarget) : null], [fcLbl, (m.hr || "—") + "", fcScore]]
     .concat(m.watts != null ? [["Puissance", m.watts + " W", m.pTarget ? SC.S.inTarget(m.inPower) : null]].concat(m.pTarget ? [["Dans cible W", m.inPower + "%", SC.S.inTarget(m.inPower)]] : []) : [])
     .concat([["Dérive FC", m.hrDrift != null ? m.hrDrift + "%" : "—", m.hrDrift != null && m.cadenceSd <= 6 ? SC.S.drift(m.hrDrift) : null]]);
 }
@@ -323,8 +326,15 @@ exports.handler = async (event) => {
 
   // Plan du jour (moteur extrait de l'app — non bloquant)
   let plan = null, engine = null;
-  try { const app = await get(APP.host, APP.path); if (app.status === 200) { engine = P.buildEngine(app.raw); plan = P.plannedFor(engine, ymd); } } catch (e) { plan = null; }
-  const planTxt = plan ? [plan.label, plan.sub].concat(plan.detail || []).map(strip).join(" · ") : "";
+  // État synchronisé de l'app (lv-data) : J0 de reprise, VMA… pour que le plan lu ici soit celui de ton téléphone
+  let appState = null; try { appState = (await ST.readJson("state-laurent.json")).data; } catch (e) {}
+  const storage = {};
+  if (appState && appState.rep) storage["reprise:v1"] = JSON.stringify(appState.rep);
+  if (appState && appState.refs) storage["refs:v1"] = JSON.stringify(appState.refs);
+  let oldRefs = null; try { oldRefs = (await ST.readJson("coach/refs.json")).data; } catch (e) {}
+  if (oldRefs) storage["coach:refs:v1"] = JSON.stringify(oldRefs);
+  try { const app = await get(APP.host, APP.path); if (app.status === 200) { engine = P.buildEngine(app.raw, storage); plan = P.plannedFor(engine, ymd); } } catch (e) { plan = null; }
+  const planTxt = plan ? [plan.label, plan.sub].concat(plan.specs || [], plan.detail || []).map(strip).join(" · ") : "";
 
   // Détail (description) des activités du jour + streams
   const items = await pool(todays, 3, async (a) => {
@@ -346,10 +356,14 @@ exports.handler = async (event) => {
     // Cible de puissance (HT) : note > plan du jour s'il s'agit d'une séance vélo
     const pTarget = cls0.fam === "ride" ? (M.powerTarget(note.raw) || (/velo|v[ée]lo|home-trainer|\bht\b|tr\/min|\bw\b/i.test(planTxt) ? M.powerTarget(planTxt) : null)) : null;
     const r = analyse(full, st, target, pTarget);
+    // Cible FC : note > plan du jour si la séance prévue est du même type (vélo ↔ vélo, course ↔ course)
+    const planIsRide = /home-trainer|h\.t|v[ée]lo/i.test(planTxt), planIsRun = plan && ["fond", "cotes", "longue", "qualite", "seuil"].includes(plan.typeKey) && !planIsRide;
+    const hrBand = M.hrTarget(note.raw) || ((cls0.fam === "ride" && planIsRide) || ((cls0.fam === "run") && planIsRun) ? M.hrTarget(planTxt) : null);
+    const hrIn = hrBand && st ? M.hrShare(st, hrBand, cls0.fam === "run" ? 0.6 : 0.3) : null;
     const fam = r.cls.fam;
     const OTHER = { WeightTraining: "Renforcement", Workout: "Renforcement / circuit", Crossfit: "CrossFit", Yoga: "Yoga / mobilité", Pilates: "Pilates", Walk: "Marche", Swim: "Natation", Elliptical: "Elliptique", StairStepper: "Stepper", Rowing: "Rameur" };
     const typeLbl = fam === "ride" ? (r.cls.sub === "ht" ? "Vélo · home-trainer" : "Vélo · route") : fam === "run" ? (r.cls.sub === "trail" ? "Trail" : "Course") : fam === "hike" ? (/walk/i.test(a.sport_type || "") ? "Marche" : "Rando montagne") : (OTHER[a.sport_type] || a.sport_type || "Activité");
-    return { a: full, day: ymd, cls: r.cls, m: r.m, note, intent, intentSrc, planIntent, typeLbl, charts: [] };
+    return { a: full, day: ymd, cls: r.cls, m: r.m, note, intent, intentSrc, planIntent, typeLbl, charts: [], hrIn };
   });
 
   // Historique comparable : 8 dernières séances de la même famille (rando ↔ trail pour la VAM)
@@ -366,6 +380,11 @@ exports.handler = async (event) => {
   const computed = new Map();
   await pool(want, 8, async (a) => { const st = await streams(token, a.id); computed.set(a.id, Object.assign({ day: dayOf(a) }, analyse(a, st, ""))); });
   const histFor = (f) => (histBy[f] || []).map((a) => computed.get(a.id)).filter((h) => h && h.m);
+
+  // Repère de puissance HT (FC 105-125) : minutes de toutes les séances HT connues (jour + historique)
+  const htSeries = items.filter((x) => x.m && x.cls.sub === "ht").map((x) => x.m.series).concat(histFor("ride").filter((h) => h.cls.sub === "ht").map((h) => h.m.series));
+  const pRef = M.powerRef(htSeries, [105, 125]);
+  const refs = pRef ? { ht: Object.assign(pRef, { updated: ymd }) } : (oldRefs || null);
 
   // Graphiques
   const imgs = [];
@@ -400,7 +419,15 @@ exports.handler = async (event) => {
   if (isRace(plan) || items.some((x) => x.intent === "race")) special.push("JOUR DE COURSE : juge la gestion (départ, régularité, descentes), pas l'intensité.");
   if (isRace(yPlan) || acts.some((a) => dayOf(a) === addDays(ymd, -1) && K.intentOf(a.name) === "race")) special.push("LENDEMAIN DE COURSE : la priorité est la récupération.");
   items.forEach((x) => { if (x.a.trainer && x.cls.fam === "run") special.push(`« ${x.a.name} » est sur tapis : pente et VAP non mesurées, ne commente pas la VAP.`); });
-  const cctx = { dateLbl: frLong(ymd), plan, tomorrow, last3, week, items, special };
+  // Mémoire du coach : clés de défauts par jour (lv-data coach/memoire.json) + rattrapage sur l'historique calculé
+  let mem = null; try { mem = (await ST.readJson("coach/memoire.json")).data; } catch (e) {}
+  mem = mem && mem.byDay ? mem : { byDay: {} };
+  computed.forEach((h) => { if (!h || !h.m || mem.byDay[h.day]) return; const hk = K.recurKeys(K.diagnose({ m: h.m, cls: h.cls, a: {} }, [], null, null)); if (hk.length) mem.byDay[h.day] = hk; });
+  const todayKeys = [...new Set([].concat(...items.map((x) => K.recurKeys(x.diag))))];
+  const recur = K.recurrences(mem, ymd, todayKeys);
+  mem.byDay[ymd] = todayKeys;
+  const cutoff = addDays(ymd, -120); Object.keys(mem.byDay).forEach((d) => { if (d < cutoff) delete mem.byDay[d]; });
+  const cctx = { dateLbl: frLong(ymd), plan, tomorrow, last3, week, items, special, recur };
   const facts = [
     `Date : ${frLong(ymd)}`,
     plan ? `Séance prévue au plan aujourd'hui : ${strip(plan.label)}${plan.sub ? " — " + strip(plan.sub) : ""}${plan.block ? " (bloc : " + plan.block + ")" : ""}.` + (plan.detail && plan.detail.length ? " Détail : " + plan.detail.map(strip).join(" | ") : "") : "Plan du jour : indisponible.",
@@ -431,8 +458,16 @@ exports.handler = async (event) => {
         charts: x.svgs || [],
       })),
     };
-    if (q.debug === "1") rpt.prompt = K.userPrompt(cctx);
-    if (q.store === "1") { const w = await ST.writeReport(ymd, rpt); rpt.stored = w.ok; if (!w.ok) rpt.storeError = w; }
+    rpt.prompt = K.userPrompt(cctx); // contexte complet : sert aussi à la discussion avec le coach
+    rpt.refs = refs;
+    rpt.flags = recur.filter((r) => r.count >= 3);
+    if (q.store === "1") {
+      const w = await ST.writeReport(ymd, rpt); rpt.stored = w.ok; if (!w.ok) rpt.storeError = w;
+      if (pRef) await ST.writeJson("coach/refs.json", refs, "coach refs " + ymd);
+      mem.titles = mem.titles || {}; mem.titles[ymd] = rep.titre + (rep.demain ? " — demain : " + rep.demain : "");
+      Object.keys(mem.titles).forEach((d) => { if (d < cutoff) delete mem.titles[d]; });
+      mem.updated = new Date().toISOString(); await ST.writeJson("coach/memoire.json", mem, "coach mémoire " + ymd);
+    }
     return J(200, rpt);
   }
   if (isPreview) {

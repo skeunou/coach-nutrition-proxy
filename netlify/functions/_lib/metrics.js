@@ -133,9 +133,10 @@ function climbs(ss) {
   const segs = []; let cur = null, flat = 0;
   ss.forEach((p) => {
     if (p.g >= 4) {
-      if (!cur) cur = { gain: 0, time: 0, dist: 0, cad: [], hr: [] };
+      if (!cur) cur = { gain: 0, time: 0, dist: 0, cad: [], hr: [], walk: 0 };
       cur.gain += Math.max(0, p.dAlt); cur.time += p.dt + flat; cur.dist += p.dd; flat = 0;
-      if (p.cad) cur.cad.push([p.cad * 2, p.dt]);
+      // < 140 pas/min = marche (rando-course assumée en trail) : exclue de la cadence de COURSE en montée
+      if (p.cad && p.cad * 2 >= 140) cur.cad.push([p.cad * 2, p.dt]); else if (p.cad) cur.walk += p.dt;
       if (p.hr) cur.hr.push([p.hr, p.dt]);
     } else if (cur) {
       flat += p.dt;
@@ -211,7 +212,7 @@ function runMetrics(streams) {
     halves: hv ? { hr1: r0(hv.a.hr), hr2: r0(hv.b.hr), pace1: paceStr(hv.a.v), pace2: paceStr(hv.b.v) } : null,
     climb: clGain >= 25 ? {
       n: cl.length, gain: r0(clGain), min: r0(clTime / 60), vam: r0((clGain / clTime) * 3600),
-      cadence: r0(clCad), hr: r0(clHr),
+      cadence: r0(clCad), hr: r0(clHr), walkPct: clTime ? r0((cl.reduce((a, s) => a + s.walk, 0) / clTime) * 100) : null,
       best: best ? { gain: r0(best.gain), min: r1(best.time / 60), vam: r0((best.gain / best.time) * 3600), cadence: best.cad.length ? r0(wmean(best.cad)) : null } : null,
     } : null,
     descentKmh: descV ? r1(descV * 3.6) : null, descentMin: r0(descT / 60),
@@ -271,6 +272,37 @@ function rideMetrics(streams, target, pTarget) {
   };
 }
 
+/* Cible de FC : « FC 105-125 », « FC visée 105-125 », « FC < 140 », « FC max 155 » → [lo, hi] */
+function hrTarget(...texts) {
+  for (const t of texts) {
+    if (!t) continue;
+    const s = String(t).replace(/<[^>]+>/g, " ");
+    let m = /\bFC\b[^0-9<]{0,14}(\d{2,3})\s*[-–à]\s*(\d{2,3})/i.exec(s);
+    if (m) { const a = +m[1], b = +m[2]; if (a >= 80 && b <= 200 && b > a) return [a, b]; }
+    m = /\bFC\b[^0-9]{0,10}(?:<|≤|max(?:imum)?|plafond)\s*(\d{2,3})/i.exec(s) || /\bFC\s*max\b[^0-9]{0,6}(\d{2,3})/i.exec(s);
+    if (m) { const v = +m[1]; if (v >= 90 && v <= 200) return [0, v]; }
+  }
+  return null;
+}
+/* Part du temps (en mouvement, FC mesurée) dans la bande FC */
+function hrShare(streams, band, minSpeed) {
+  if (!band) return null;
+  const ss = samples(streams, minSpeed == null ? 0.3 : minSpeed).filter((p) => p.hr);
+  const tot = ss.reduce((a, p) => a + p.dt, 0);
+  if (tot < 300) return null;
+  const sh = (f) => r0((ss.filter(f).reduce((a, p) => a + p.dt, 0) / tot) * 100);
+  return { band, in: sh((p) => p.hr >= band[0] && p.hr <= band[1]), above: sh((p) => p.hr > band[1]), below: sh((p) => p.hr < band[0]) };
+}
+/* Repère de puissance HT : minutes où la FC est dans [lo, hi] → P25-P75 des watts */
+function powerRef(seriesList, band) {
+  const w = [];
+  seriesList.forEach((sr) => (sr || []).forEach((p) => { if (p.w > 0 && p.hr >= band[0] && p.hr <= band[1]) w.push(p.w); }));
+  if (w.length < 10) return null;
+  w.sort((a, b) => a - b);
+  const q = (k) => w[Math.min(w.length - 1, Math.floor(k * (w.length - 1)))];
+  return { lo: Math.round(q(0.25) / 5) * 5, hi: Math.round(q(0.75) / 5) * 5, median: Math.round(q(0.5)), n: w.length, hr: band };
+}
+
 /* Cible de puissance : « 150-160 W », « puissance 150-160 », « P : 150-160 », « 150 W » (±5) */
 function powerTarget(...texts) {
   for (const t of texts) {
@@ -306,4 +338,4 @@ function userNote(desc) {
   return s.slice(0, 280);
 }
 
-module.exports = { OPT, powerTarget, classify, runMetrics, rideMetrics, cadenceTarget, userNote, gapFactor, paceStr, ZONES, FCMAX };
+module.exports = { OPT, powerTarget, hrTarget, hrShare, powerRef, classify, runMetrics, rideMetrics, cadenceTarget, userNote, gapFactor, paceStr, ZONES, FCMAX };
