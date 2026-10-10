@@ -82,7 +82,8 @@ function diagnose(x, hist, intent, note) {
     return C.sort((a, b) => b.p - a.p);
   }
   const H = hist.map((h) => h.m).filter(Boolean);
-  const z = m.zones || null;
+  if (m.hrSuspect) add(95, "FC probablement faussée : sur une bonne partie de la sortie elle colle à ta cadence (artefact classique du capteur au poignet). Zones, découplage et efficacité ne sont pas fiables aujourd'hui.", "alerte");
+  const z = m.hrSuspect ? null : (m.zones || null);
   const z12 = z ? z[0] + z[1] : null, z3p = z ? z[2] + z[3] + z[4] : null, z45 = z ? z[3] + z[4] : null;
   const easyLike = ["easy", "recovery", "long"].includes(intent);
   const hardLike = ["intervals", "threshold", "race", "test"].includes(intent);
@@ -111,8 +112,13 @@ function diagnose(x, hist, intent, note) {
       else if (m.decoupling >= 5) add(60, `Découplage ${m.decoupling} % : dérive modérée en 2e moitié, ta base aérobie n'encaisse pas encore cette allure sur cette durée.`, "vigilance");
       else add(35, `Découplage ${m.decoupling} % sur une allure régulière : base aérobie solide sur ${m.movingMin} min.`, "positif");
     }
+    if (m.splitPct != null && ["race", "long", "threshold", "test", "easy"].includes(intent)) {
+      if (m.splitPct >= 8) add(intent === "race" || intent === "long" ? 80 : 55, `2e moitié ${m.splitPct} % plus lente que la 1re à pente égale (VAP) : ${intent === "race" ? "départ trop rapide, tu as payé la fin" : "l'allure n'a pas tenu sur la durée"}.`, "vigilance");
+      else if (m.splitPct <= -2 && (intent === "race" || intent === "long")) add(45, `2e moitié plus rapide que la 1re à pente égale (VAP, ${m.splitPct} %) : course bien gérée, tu as gardé de la réserve.`, "positif");
+      else if (intent === "race" || intent === "long") add(40, `Allure régulière entre les deux moitiés à pente égale (écart ${m.splitPct} %) : effort bien réparti.`, "positif");
+    }
     const efMed = median(H.map((h) => h.ef));
-    if (m.ef && efMed && H.length >= 3) {
+    if (m.ef && efMed && H.length >= 3 && !m.hrSuspect) {
       const d = Math.round((m.ef / efMed - 1) * 100);
       if (Math.abs(d) >= 4) add(50, `Efficacité aérobie ${m.ef} vs ${efMed.toFixed(2)} habituellement (${d > 0 ? "+" : ""}${d} %) : ${d > 0 ? "plus de vitesse pour le même cœur" : "moins de vitesse pour le même cœur"}${H.length < 5 ? " (peu de recul)" : ""}.`, d > 0 ? "positif" : "vigilance");
     }
@@ -132,6 +138,20 @@ function diagnose(x, hist, intent, note) {
       else if (m.inTarget >= 85) add(40, `${m.inTarget} % du temps dans ta cible ${m.target[0]}-${m.target[1]} tr/min : consigne tenue.`, "positif");
       else add(45, `${m.inTarget} % du temps dans ta cible ${m.target[0]}-${m.target[1]} tr/min : correct, mais des passages hors cible.`, "neutre");
     }
+    if (m.pTarget && m.inPower != null) {
+      if (m.inPower < 70) {
+        const why = m.pBelow >= 20 && m.pAbove >= 20 ? `puissance irrégulière : ${m.pBelow} % du temps sous la cible et ${m.pAbove} % au-dessus, tu oscilles au lieu de tenir un effort stable`
+          : m.pBelow > m.pAbove ? `${m.pBelow} % du temps sous la cible : trop léger, la séance n'a pas produit le travail prévu`
+          : `${m.pAbove} % du temps au-dessus de la cible : trop appuyé pour la consigne`;
+        add(70, `Seulement ${m.inPower} % du temps dans ta cible de puissance ${m.pTarget[0]}-${m.pTarget[1]} W (moyenne ${m.watts} W) : ${why}.`, "vigilance");
+      }
+      else add(40, `${m.inPower} % du temps dans ta cible ${m.pTarget[0]}-${m.pTarget[1]} W : consigne de puissance tenue.`, "positif");
+    }
+    const wpbMed = median(H.map((h) => h.wPerBeat));
+    if (m.wPerBeat && wpbMed && H.filter((h) => h.wPerBeat).length >= 3) {
+      const d = Math.round((m.wPerBeat / wpbMed - 1) * 100);
+      if (Math.abs(d) >= 5) add(50, `${m.wPerBeat} W par battement vs ${wpbMed.toFixed(2)} habituellement (${d > 0 ? "+" : ""}${d} %) : ${d > 0 ? "plus de puissance pour le même cœur, la forme aérobie progresse" : "le cœur travaille plus pour la même puissance (fatigue, chaleur, sommeil ?)"}.`, d > 0 ? "positif" : "vigilance");
+    }
     if (m.cadenceSd > 8) add(50, `Cadence très dispersée (±${m.cadenceSd} tr/min) : pédalage irrégulier, travaille la régularité avant l'intensité.`, "vigilance");
     if (z && (easyLike || intent === null) && z3p >= 20) add(65, `${z3p} % du temps au-dessus de 143 bpm sur du vélo : ce n'était plus de la récupération active.`, "vigilance");
     else if (z && z12 >= 90) add(30, `${z12} % du temps en Z1-Z2 : vrai travail facile, sans impact.`, "positif");
@@ -142,17 +162,36 @@ function diagnose(x, hist, intent, note) {
 
 /* ---------- Prompt ---------- */
 const SYS = [
-  "Tu es le coach trail de Laurent : infirmier libéral, athlète « diesel » d'ultra-endurance, VO2max 56. Objectif : UT4M 180 Challenge (juillet 2027, 4 étapes de ~44 km, 11 700 m D+ au total). Ses limiteurs : économie de grimpe (VAM) et durabilité en descente. Il sort d'une pubalgie réveillée fin septembre : la reprise est progressive, le pubis passe avant tout.",
-  "Tu écris son compte-rendu du soir. Il n'a jamais eu de coach : explique ce que les chiffres VEULENT DIRE pour lui, pas ce qu'ils valent. Il voit déjà les chiffres et les graphiques dans le mail : ne les récite pas.",
-  "MÉTHODE :",
-  "- Le DIAGNOSTIC fourni (constats priorisés, calculés) est ta base. Commence par le constat de plus haute priorité. Un constat « alerte » se dit sans détour.",
-  "- Juge la séance par rapport à son INTENTION (note de Laurent > titre > plan). Une FC haute est une faute sur un footing, pas sur du fractionné.",
-  "- Si la séance réalisée diffère du plan du jour, dis-le et ce que ça change.",
-  "- Relie au moins un constat à l'UT4M (durabilité sur 4 jours, grimpe, descente, gestion de l'intensité).",
-  "- Tiens compte des 3 derniers jours pour la fatigue, et de la séance prévue DEMAIN pour la consigne.",
-  "RÈGLES ABSOLUES : aucun chiffre, aucune séance, aucun fait qui ne figure pas dans les données fournies (les repères de zones et de cadence fournis sont autorisés). Si la note est absente, n'invente ni ressenti ni douleur. Tutoiement, français, phrases courtes, ton direct de coach. Pas d'emoji, pas de formule creuse (« bravo », « continue comme ça »).",
+  "Tu es le coach trail de Laurent : infirmier libéral, athlète « diesel » d'ultra-endurance, VO2max 56. Objectif : UT4M 180 Challenge (juillet 2027, 4 étapes de ~44 km, 11 700 m D+). Limiteurs : économie de grimpe (VAM) et durabilité en descente. Pubalgie réveillée fin septembre : reprise progressive, le pubis passe avant la performance.",
+  "",
+  "TON TRAVAIL : transformer un diagnostic chiffré en décisions. Un bon compte-rendu fait gagner quelque chose à Laurent : comprendre une erreur, confirmer un bon choix, savoir exactement quoi faire demain. Il n'a jamais eu de coach : explique le « pourquoi » (physiologie, risque de blessure, performance) en une phrase simple.",
+  "",
+  "LIRE LES DONNÉES :",
+  "- DIAGNOSTIC : constats calculés et fiables, classés par priorité. C'est ta matière première ; le constat n°1 ouvre ton analyse. Un constat [alerte] se dit sans détour.",
+  "- INTENTION de la séance = l'étalon. Juge l'écart entre l'intention et le réalisé, jamais les chiffres dans l'absolu.",
+  "- 3 DERNIERS JOURS : l'intensité indiquée est celle mesurée. N'en déduis aucune fatigue ni charge qui n'y figure pas.",
+  "- Échelles de Laurent : ZP = douleur pubienne /10 (0 = rien). « Jambe x/10 » = sa sensation des jambes, échelle personnelle : cite-la telle quelle, sans dire si c'est bon ou mauvais. RPE = effort perçu /10.",
+  "- Une donnée marquée « non interprétable », « suspecte » ou « faussée » : tu n'en tires rien.",
+  "",
+  "CE QUI REND L'ANALYSE UTILE :",
+  "- Chaque phrase de « sens » s'appuie sur un constat ou un chiffre précis des données ET dit pourquoi ça compte.",
+  "- Une erreur se nomme clairement avec sa conséquence. Une réussite se dit en une phrase, sans en rajouter.",
+  "- L'UT4M seulement si le lien est concret et propre à ce constat (ex. cadence en montée → 11 700 m D+ ; descente → durabilité sur 4 jours). Sinon n'en parle pas.",
+  "- Journée calme sans constat marquant : dis-le en une phrase. Ne remplis jamais.",
+  "- « demain » = UNE consigne exécutable : quoi faire, à quelle intensité (zones, FC, cadence fournies), et la règle d'arrêt si le pubis est concerné.",
+  "  · VEILLE DE COURSE : brief de course — départ retenu, plafond de FC ou de zone pour la 1re montée, gestion des descentes vu le pubis, règle d'arrêt (ex. ZP qui monte), et ce qu'il devra noter après la course.",
+  "  · LENDEMAIN DE COURSE : récupération et ce qu'il doit surveiller (ZP au réveil, jambes).",
+  "  · Plan de demain = repos : la consigne porte sur la récupération ou sur ce qu'il doit noter.",
+  "",
+  "INTERDITS :",
+  "- Tout chiffre, fait, séance, douleur ou sensation absent des données. Toute déduction présentée comme un fait.",
+  "- Formules creuses : « ton organisme encaisse bien », « tu as posé les bases », « c'est bon signe », « continue comme ça », « bravo », « belle séance », « à l'écoute de ton corps », « bonne gestion » sans dire laquelle.",
+  "- Réciter les chiffres affichés sans les interpréter.",
+  "- Toute phrase qui pourrait s'appliquer à n'importe quel athlète n'importe quel jour.",
+  "Style : tutoiement, français, phrases courtes, ton direct de coach, pas d'emoji.",
+  "",
   "Réponds UNIQUEMENT en JSON valide, sans markdown :",
-  "{\"titre\": \"verdict en 8 mots max\", \"passe\": \"2 phrases : ce qui s'est passé, jugé par rapport à l'intention\", \"sens\": \"3 à 4 phrases : ce que ça veut dire + lien avec l'UT4M\", \"demain\": \"1 consigne concrète pour demain, adaptée à la séance prévue et au diagnostic\"}",
+  "{\"titre\": \"verdict précis en 8 mots max, propre à cette journée\", \"passe\": \"1 à 2 phrases : ce qui s'est passé, jugé par rapport à l'intention\", \"sens\": \"1 à 4 phrases selon ce qu'il y a vraiment à dire\", \"demain\": \"1 à 2 phrases : la consigne exécutable\"}",
 ].join("\n");
 
 function userPrompt(ctx) {
@@ -160,7 +199,8 @@ function userPrompt(ctx) {
   L.push(`Date : ${ctx.dateLbl}`);
   L.push(ctx.plan ? `PLAN DU JOUR : ${strip(ctx.plan.label)}${ctx.plan.sub ? " — " + strip(ctx.plan.sub) : ""}${ctx.plan.block ? " (bloc : " + ctx.plan.block + ")" : ""}.` : "PLAN DU JOUR : indisponible.");
   L.push(ctx.tomorrow ? `PLAN DE DEMAIN : ${strip(ctx.tomorrow.label)}${ctx.tomorrow.sub ? " — " + strip(ctx.tomorrow.sub) : ""}.` + (ctx.tomorrow.detail && ctx.tomorrow.detail.length ? " Détail : " + ctx.tomorrow.detail.slice(0, 4).map(strip).join(" | ") : "") : "PLAN DE DEMAIN : indisponible.");
-  L.push("3 DERNIERS JOURS : " + (ctx.last3.length ? ctx.last3.join(" ; ") : "aucune activité enregistrée."));
+  if (ctx.special && ctx.special.length) L.push("CONTEXTE SPÉCIAL : " + ctx.special.join(" "));
+  L.push("3 DERNIERS JOURS (intensité mesurée par la FC moyenne) :" + (ctx.last3.length ? "\n- " + ctx.last3.join("\n- ") : " aucune activité enregistrée."));
   L.push(`SEMAINE EN COURS : ${ctx.week.km} km course/trail, ${ctx.week.dp} m D+, ${ctx.week.ride} min de vélo` + (ctx.week.tg && ctx.week.tg.km ? ` (cible plan ${ctx.week.tg.km} km / ${ctx.week.tg.dp} m D+).` : "."));
   ctx.items.forEach((x) => {
     L.push("");
@@ -188,4 +228,21 @@ function fallbackReport(ctx, why) {
   return { titre: d[0] && d[0].tone === "alerte" ? "Point de vigilance du jour" : "Les constats du jour", passe, sens, demain, src: "calc", note: why };
 }
 
-module.exports = { parseNote, intentOf, diagnose, SYS, userPrompt, fallbackReport, INTENT_LBL, VAM_TARGET };
+/* ---------- Contrôle de la réponse IA ----------
+   Erreurs anticipées : chiffre inventé, formule creuse, champ vide, JSON tronqué.
+   Retourne null si OK, sinon la raison (servira de consigne de correction). */
+const CREUX = [/organisme encaisse/i, /pos[ée] les bases/i, /c'est (un )?bon signe/i, /continue comme [çc]a/i, /\bbravo\b/i, /belle s[ée]ance/i, /[àa] l'[ée]coute de ton corps/i, /ton corps te remerciera/i];
+function numbersIn(t) { return (String(t).match(/\d+(?:[.,]\d+)?/g) || []).map((x) => String(parseFloat(x.replace(",", ".")))); }
+function checkReply(j, sourceText) {
+  if (!j || typeof j !== "object") return "réponse non JSON";
+  for (const k of ["titre", "passe", "sens", "demain"]) if (!j[k] || String(j[k]).trim().length < 8) return `champ « ${k} » vide`;
+  const all = [j.titre, j.passe, j.sens, j.demain].join(" ");
+  const allowed = new Set(numbersIn(sourceText));
+  const bad = numbersIn(all).filter((n) => !allowed.has(n) && !(Number.isInteger(+n) && +n <= 5));
+  if (bad.length) return `chiffres absents des données : ${[...new Set(bad)].slice(0, 5).join(", ")}`;
+  const cr = CREUX.find((re) => re.test(all));
+  if (cr) return `formule creuse interdite : « ${(all.match(cr) || [""])[0]} »`;
+  return null;
+}
+
+module.exports = { parseNote, intentOf, diagnose, SYS, userPrompt, fallbackReport, checkReply, INTENT_LBL, VAM_TARGET };

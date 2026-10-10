@@ -94,7 +94,7 @@ async function listActs(token, ymd) {
   }
   return all.sort((a, b) => String(a.start_date_local).localeCompare(String(b.start_date_local)));
 }
-const KEYS = "time,distance,altitude,heartrate,cadence,velocity_smooth,grade_smooth,moving";
+const KEYS = "time,distance,altitude,heartrate,cadence,velocity_smooth,grade_smooth,moving,watts";
 async function streams(token, id) {
   const r = await get("www.strava.com", `/api/v3/activities/${id}/streams?keys=${KEYS}&key_by_type=true`, token);
   return r.json && r.json.time ? r.json : null;
@@ -102,11 +102,11 @@ async function streams(token, id) {
 const dayOf = (a) => String(a.start_date_local || a.start_date || "").slice(0, 10);
 
 /* ---------- Analyse d'une activité ---------- */
-function analyse(a, st, target) {
+function analyse(a, st, target, pTarget) {
   const cls = M.classify(a);
   if (!st) return { cls, m: null };
   let m = null;
-  if (cls.fam === "ride") m = M.rideMetrics(st, target === undefined ? M.cadenceTarget(a.description) : target);
+  if (cls.fam === "ride") m = M.rideMetrics(st, target === undefined ? M.cadenceTarget(a.description) : target, pTarget || null);
   else if (cls.fam === "run" || cls.fam === "hike") m = M.runMetrics(st);
   // Distance et D+ affichés = chiffres officiels Strava (cohérents avec l'appli)
   if (m && a.distance) m.km = Math.round(a.distance / 10) / 100;
@@ -150,6 +150,7 @@ function factsFor(x, hist) {
     push(cmp("Cadence moyenne (hors roue libre)", m.cadence, med((h) => h.cadence), " tr/min"));
     L.push(`Écart-type de cadence ${m.cadenceSd} tr/min ; roue libre ${m.coastPct} % du temps. Répartition : <60 ${m.cadenceHist[0]}%, 60-70 ${m.cadenceHist[1]}%, 70-80 ${m.cadenceHist[2]}%, 80-90 ${m.cadenceHist[3]}%, 90-100 ${m.cadenceHist[4]}%, >100 ${m.cadenceHist[5]}%.`);
     L.push(m.target ? `Cible de cadence de la séance : ${m.target[0]}-${m.target[1]} tr/min → ${m.inTarget} % du temps pédalé dans la cible.` : "Aucune cible de cadence indiquée pour cette séance : ne pas en inventer une.");
+    if (m.watts != null) L.push(`Puissance moyenne en pédalant : ${m.watts} W` + (med((h) => h.watts) != null ? ` (médiane des dernières : ${Math.round(med((h) => h.watts))} W)` : "") + (m.pTarget ? ` ; cible ${m.pTarget[0]}-${m.pTarget[1]} W → ${m.inPower} % du temps dans la cible` : " ; aucune cible de puissance notée") + (m.wPerBeat ? ` ; ${m.wPerBeat} W par battement (efficacité : plus haut = mieux` + (med((h) => h.wPerBeat) != null ? `, médiane ${(+med((h) => h.wPerBeat)).toFixed(2)}` : "") + ")" : "") + ".");
     push(cmp("FC moyenne", m.hr, med((h) => h.hr), " bpm"));
     if (m.zones) L.push(`Temps en zones FC : ` + m.zones.map((z, i) => "Z" + (i + 1) + " " + z + "%").join(", ") + ".");
     if (m.hrDrift != null) L.push(cmp("Dérive FC 2e moitié vs 1re", m.hrDrift, med((h) => h.hrDrift), " %", 1) + (m.halves ? ` — FC ${m.halves.hr1}→${m.halves.hr2} bpm, cadence ${m.halves.cad1}→${m.halves.cad2}, vitesse ${m.halves.kmh1}→${m.halves.kmh2} km/h.` : ""));
@@ -158,27 +159,34 @@ function factsFor(x, hist) {
 }
 
 /* ---------- Coach IA : Sonnet si le temps le permet, Haiku en repli ---------- */
-const MODELS = [["claude-sonnet-5-5", 9000, "Sonnet"], ["claude-haiku-4-5", 2500, "Haiku"]]; // [id, budget minimal ms, libellé]
+// Chaîne de modèles : si ta clé n'a pas accès au premier (404) ou s'il échoue, on passe au suivant.
+const MODELS = [["claude-sonnet-5-5", 9000, "Sonnet 5.5"], ["claude-sonnet-4-5", 9000, "Sonnet 4.5"], ["claude-haiku-4-5", 2500, "Haiku"]]; // [id, budget minimal ms, libellé]
+function parseJSON(r) {
+  let t = r.json && r.json.content ? r.json.content.map((c) => c.text || "").join("").trim() : "";
+  const mm = t.match(/```(?:json)?\s*([\s\S]*?)```/); if (mm) t = mm[1];
+  const a = t.indexOf("{"), e = t.lastIndexOf("}");
+  if (a < 0 || e <= a) return { raw: t, j: null };
+  try { return { raw: t.slice(a, e + 1), j: JSON.parse(t.slice(a, e + 1)) }; } catch (x) { return { raw: t, j: null }; }
+}
 async function coach(ctx, skipLLM, deadline) {
   if (skipLLM || !process.env.ANTHROPIC_API_KEY_NUTRITION) return null;
-  const user = K.userPrompt(ctx);
+  const user = K.userPrompt(ctx), source = K.SYS + "\n" + user, tried = [];
+  const H = { "x-api-key": process.env.ANTHROPIC_API_KEY_NUTRITION, "anthropic-version": "2023-06-01" };
   for (const [model, need, lbl] of MODELS) {
-    const budget = deadline - Date.now() - 600;
-    if (budget < need) continue;
-    try {
-      const r = await post("api.anthropic.com", "/v1/messages", {
-        model, max_tokens: 900, system: K.SYS, messages: [{ role: "user", content: user }],
-      }, { "x-api-key": process.env.ANTHROPIC_API_KEY_NUTRITION, "anthropic-version": "2023-06-01" }, Math.min(22000, budget));
-      let t = r.json && r.json.content ? r.json.content.map((c) => c.text || "").join("").trim() : "";
-      const mm = t.match(/```(?:json)?\s*([\s\S]*?)```/); if (mm) t = mm[1];
-      const a = t.indexOf("{"), e = t.lastIndexOf("}");
-      if (a >= 0 && e > a) {
-        const j = JSON.parse(t.slice(a, e + 1));
-        if (j.sens || j.passe) return { titre: String(j.titre || ""), passe: String(j.passe || ""), sens: String(j.sens || ""), demain: String(j.demain || ""), src: "ia", model: lbl };
-      }
-    } catch (e) {}
+    let msgs = [{ role: "user", content: user }];
+    for (let attempt = 0; attempt < 2; attempt++) { // 2e essai = correction ciblée de la 1re réponse
+      const budget = deadline - Date.now() - 600;
+      if (budget < need) { tried.push({ model: lbl, why: "temps insuffisant" }); break; }
+      const r = await post("api.anthropic.com", "/v1/messages", { model, max_tokens: 900, system: K.SYS, messages: msgs }, H, Math.min(22000, budget));
+      if (r.status !== 200) { tried.push({ model: lbl, why: "HTTP " + r.status + (r.json && r.json.error ? " " + (r.json.error.type || r.json.error.message || "") : "") }); break; }
+      const { raw, j } = parseJSON(r);
+      const why = K.checkReply(j, source);
+      if (!why) { tried.push({ model: lbl, ok: true, attempt: attempt + 1 }); return { titre: String(j.titre), passe: String(j.passe), sens: String(j.sens), demain: String(j.demain), src: "ia", model: lbl, tried }; }
+      tried.push({ model: lbl, why });
+      msgs = msgs.concat([{ role: "assistant", content: raw || "(vide)" }, { role: "user", content: `Ta réponse est rejetée : ${why}. Réécris le JSON complet en corrigeant uniquement ce problème, sans ajouter aucun chiffre absent des données.` }]);
+    }
   }
-  return null;
+  return { failed: true, tried };
 }
 
 /* ---------- Graphiques ---------- */
@@ -208,6 +216,7 @@ function chartsFor(x, hist, imgs, noPng) {
     add(G.sessionRide(m), "Ta séance : cadence et FC");
     add(G.cadenceHist(m), "Répartition de la cadence");
     add(G.bars("Cadence moyenne", "tr/min · dernières séances vélo", series((q) => q.cadence, null, (v, today) => today && m.target ? SC.S.inTarget(m.inTarget) : null), { fmt: (v) => Math.round(v), refs: m.target ? [{ v: m.target[0], label: "cible " + m.target[0] + "-" + m.target[1], color: "#4ade80" }] : [] }), "Cadence moyenne");
+    if (m.wPerBeat) { const wRef = median(hist.map((h) => h.m && h.m.wPerBeat)); add(G.bars("Puissance par battement", "W ÷ FC · plus haut = cœur plus efficace", series((q) => q.wPerBeat, null, (v) => SC.S.ef(v, wRef)), { fmt: (v) => v.toFixed(2) }), "Puissance par battement"); }
     add(G.bars("Dérive cardiaque", "FC 2e moitié vs 1re · plus bas = mieux", series((q) => q.hrDrift, null, SC.S.drift), { zero: true, fmt: (v) => v.toFixed(1) + "%" }), "Dérive cardiaque");
   }
   return out;
@@ -228,7 +237,9 @@ function kpis(x) {
   if (!m) return [["Durée", Math.round((a.moving_time || 0) / 60) + " min"]].concat(a.average_heartrate ? [["FC moy", Math.round(a.average_heartrate) + ""]] : [], a.max_heartrate ? [["FC max", Math.round(a.max_heartrate) + ""]] : [], x.note && x.note.rpe != null ? [["RPE", x.note.rpe + "/10"]] : []);
   const easy = ["easy", "recovery", "long"].includes(x.intent), z12 = m.zones ? m.zones[0] + m.zones[1] : null;
   if (m.kind === "run") return [["Distance", m.km + " km"], ["D+", m.dPlus + " m"], ["Allure VAP", m.gapPace], ["FC moy", (m.hr || "—") + "", easy ? SC.S.easyShare(z12) : null], ["Cadence", (m.cadence || "—") + "", SC.S.runCadence(m.cadence)], m.climb && m.climb.gain >= 50 ? ["VAM", m.climb.vam + "", SC.S.vam(m.climb.vam, VAM_TARGET)] : ["Découpl.", m.decouplingValid ? m.decoupling + "%" : "—", m.decouplingValid ? SC.S.decoupling(m.decoupling) : null]];
-  return [["Durée", m.movingMin + " min"], ["Cadence", m.cadence + "", m.target ? SC.S.rideCadence(m.cadence, m.target) : null], [m.target ? "Dans cible" : "Écart-type", m.target ? m.inTarget + "%" : "±" + m.cadenceSd, m.target ? SC.S.inTarget(m.inTarget) : null], ["FC moy", (m.hr || "—") + "", easy ? SC.S.easyShare(z12) : null], ["Dérive FC", m.hrDrift != null ? m.hrDrift + "%" : "—", m.hrDrift != null && m.cadenceSd <= 6 ? SC.S.drift(m.hrDrift) : null]];
+  return [["Durée", m.movingMin + " min"], ["Cadence", m.cadence + "", m.target ? SC.S.rideCadence(m.cadence, m.target) : null], [m.target ? "Dans cible" : "Écart-type", m.target ? m.inTarget + "%" : "±" + m.cadenceSd, m.target ? SC.S.inTarget(m.inTarget) : null], ["FC moy", (m.hr || "—") + "", easy ? SC.S.easyShare(z12) : null]]
+    .concat(m.watts != null ? [["Puissance", m.watts + " W", m.pTarget ? SC.S.inTarget(m.inPower) : null]].concat(m.pTarget ? [["Dans cible W", m.inPower + "%", SC.S.inTarget(m.inPower)]] : []) : [])
+    .concat([["Dérive FC", m.hrDrift != null ? m.hrDrift + "%" : "—", m.hrDrift != null && m.cadenceSd <= 6 ? SC.S.drift(m.hrDrift) : null]]);
 }
 function emailHTML(ctx, imgSrc) {
   const { ymd, items, rep, plan, week } = ctx;
@@ -332,7 +343,9 @@ exports.handler = async (event) => {
     // Cible de cadence vélo : note > SFR (50-55) > plan du jour s'il s'agit bien d'une séance vélo
     let target = null;
     if (cls0.fam === "ride") target = M.cadenceTarget(note.raw) || (intent === "sfr" ? [50, 55] : null) || (/velo|v[ée]lo|home-trainer|\bht\b|tr\/min/i.test(planTxt) ? M.cadenceTarget(planTxt) : null);
-    const r = analyse(full, st, target);
+    // Cible de puissance (HT) : note > plan du jour s'il s'agit d'une séance vélo
+    const pTarget = cls0.fam === "ride" ? (M.powerTarget(note.raw) || (/velo|v[ée]lo|home-trainer|\bht\b|tr\/min|\bw\b/i.test(planTxt) ? M.powerTarget(planTxt) : null)) : null;
+    const r = analyse(full, st, target, pTarget);
     const fam = r.cls.fam;
     const OTHER = { WeightTraining: "Renforcement", Workout: "Renforcement / circuit", Crossfit: "CrossFit", Yoga: "Yoga / mobilité", Pilates: "Pilates", Walk: "Marche", Swim: "Natation", Elliptical: "Elliptique", StairStepper: "Stepper", Rowing: "Rameur" };
     const typeLbl = fam === "ride" ? (r.cls.sub === "ht" ? "Vélo · home-trainer" : "Vélo · route") : fam === "run" ? (r.cls.sub === "trail" ? "Trail" : "Course") : fam === "hike" ? (/walk/i.test(a.sport_type || "") ? "Marche" : "Rando montagne") : (OTHER[a.sport_type] || a.sport_type || "Activité");
@@ -371,11 +384,23 @@ exports.handler = async (event) => {
   // Diagnostic calculé + contexte coach
   items.forEach((x) => { x.diag = K.diagnose(x, histFor(x.cls.fam), x.intent, x.note); x.facts = factsFor(x, histFor(x.cls.fam)).split("\n").slice(1).filter((l) => !/^Note écrite/.test(l)).join("\n"); });
   let tomorrow = null; try { if (engine) tomorrow = P.plannedFor(engine, addDays(ymd, 1)); } catch (e) {}
-  const last3 = acts.filter((a) => dayOf(a) >= addDays(ymd, -3) && dayOf(a) < ymd).map((a) => {
-    const c = M.classify(a), mn = Math.round((a.moving_time || 0) / 60);
-    return `${short(dayOf(a))} ${a.name} (${c.fam === "ride" ? "vélo" : c.fam === "run" ? c.sub : c.fam === "hike" ? "rando" : (a.sport_type || "")}, ${mn} min${c.fam !== "ride" && a.distance ? ", " + (a.distance / 1000).toFixed(1) + " km, " + Math.round(a.total_elevation_gain || 0) + " m D+" : ""}${a.average_heartrate ? ", FC moy " + Math.round(a.average_heartrate) : ""})`;
+  const prev3 = acts.filter((a) => dayOf(a) >= addDays(ymd, -3) && dayOf(a) < ymd);
+  const notes3 = await pool(prev3, 4, async (a) => { const d = await get("www.strava.com", `/api/v3/activities/${a.id}`, token); return K.parseNote(M.userNote(d.json && d.json.description)); });
+  const intensity = (hr) => !hr ? "FC non mesurée" : hr < 125 ? "très facile (Z1)" : hr < 143 ? "facile (Z2)" : hr < 152 ? "modéré (Z3)" : "soutenu (Z4+)";
+  const last3 = prev3.map((a, i) => {
+    const c = M.classify(a), mn = Math.round((a.moving_time || 0) / 60), n = notes3[i] || {};
+    return `${short(dayOf(a))} ${a.name} — ${c.fam === "ride" ? "vélo" : c.fam === "run" ? c.sub : c.fam === "hike" ? "rando" : (a.sport_type || "")}, ${mn} min${c.fam !== "ride" && a.distance ? ", " + (a.distance / 1000).toFixed(1) + " km, " + Math.round(a.total_elevation_gain || 0) + " m D+" : ""}, ${intensity(a.average_heartrate)}${a.average_heartrate ? " (FC moy " + Math.round(a.average_heartrate) + ")" : ""}` +
+      (n.rpe != null ? `, RPE ${n.rpe}/10` : "") + (n.pubis && n.pubis.level != null ? `, ${n.pubis.txt}` : "") + (n.legs != null ? `, jambe ${n.legs}/10` : "");
   });
-  const cctx = { dateLbl: frLong(ymd), plan, tomorrow, last3, week, items };
+  // Contexte course : veille, jour J, lendemain (plan + titres Strava)
+  const special = [];
+  let yPlan = null; try { if (engine) yPlan = P.plannedFor(engine, addDays(ymd, -1)); } catch (e) {}
+  const isRace = (p) => p && K.intentOf((p.label || "") + " " + (p.sub || "")) === "race";
+  if (isRace(tomorrow)) special.push(`VEILLE DE COURSE : demain = ${strip(tomorrow.label)}${tomorrow.sub ? " (" + strip(tomorrow.sub) + ")" : ""}. Le bloc « demain » doit être un brief de course.`);
+  if (isRace(plan) || items.some((x) => x.intent === "race")) special.push("JOUR DE COURSE : juge la gestion (départ, régularité, descentes), pas l'intensité.");
+  if (isRace(yPlan) || acts.some((a) => dayOf(a) === addDays(ymd, -1) && K.intentOf(a.name) === "race")) special.push("LENDEMAIN DE COURSE : la priorité est la récupération.");
+  items.forEach((x) => { if (x.a.trainer && x.cls.fam === "run") special.push(`« ${x.a.name} » est sur tapis : pente et VAP non mesurées, ne commente pas la VAP.`); });
+  const cctx = { dateLbl: frLong(ymd), plan, tomorrow, last3, week, items, special };
   const facts = [
     `Date : ${frLong(ymd)}`,
     plan ? `Séance prévue au plan aujourd'hui : ${strip(plan.label)}${plan.sub ? " — " + strip(plan.sub) : ""}${plan.block ? " (bloc : " + plan.block + ")" : ""}.` + (plan.detail && plan.detail.length ? " Détail : " + plan.detail.map(strip).join(" | ") : "") : "Plan du jour : indisponible.",
@@ -383,8 +408,9 @@ exports.handler = async (event) => {
     "",
   ].concat(items.map((x) => factsFor(x, histFor(x.cls.fam)))).join("\n");
   const deadline = (event && event.lvDeadline) || (T0 + 27000); // aperçu HTTP 9 s · cron 30 s
-  const rep = (await coach(cctx, q.nollm === "1", deadline)) || K.fallbackReport(cctx, q.nollm === "1" ? "Aperçu sans IA (nollm)." :
-    (event && event.lvDeadline ? "Aperçu : coach IA sauté faute de temps (10 s max par lien) — le mail de 21h dispose de 30 s." : "Le coach IA n'a pas répondu ce soir : diagnostic automatique."));
+  const ia = await coach(cctx, q.nollm === "1", deadline);
+  const rep = (ia && !ia.failed ? ia : null) || Object.assign(K.fallbackReport(cctx, q.nollm === "1" ? "Aperçu sans IA (nollm)." :
+    (event && event.lvDeadline && !event.lvFull ? "Aperçu : coach IA sauté faute de temps (10 s max par lien)." : "Le coach IA n'a pas produit de réponse fiable : diagnostic automatique.")), { tried: ia && ia.tried });
 
   const ctx = { ymd, items, rep, plan, week, imgs };
   const subject = "🏔️ " + frDate(ymd) + " — " + items.map((x) => x.m ? (x.m.kind === "run" ? `${x.typeLbl} ${x.m.km} km` : `${x.typeLbl.split(" · ")[1] === "home-trainer" ? "HT" : "Vélo"} ${x.m.movingMin}′`) : x.typeLbl).join(" · ") + (rep.titre ? " — " + rep.titre : "");
@@ -392,7 +418,7 @@ exports.handler = async (event) => {
   if (isJson) {
     const rpt = {
       v: 1, ymd, status: "ok", generatedAt: new Date().toISOString(), ms: Date.now() - T0,
-      coach: { titre: rep.titre, passe: rep.passe, sens: rep.sens, demain: rep.demain, src: rep.src, model: rep.model || null, note: rep.note || null },
+      coach: { titre: rep.titre, passe: rep.passe, sens: rep.sens, demain: rep.demain, src: rep.src, model: rep.model || null, note: rep.note || null, tried: rep.tried || null },
       plan: plan ? { label: strip(plan.label), sub: strip(plan.sub), block: plan.block } : null,
       tomorrow: tomorrow ? { label: strip(tomorrow.label), sub: strip(tomorrow.sub) } : null,
       week: { km: week.km, dp: week.dp, ride: week.ride, tg: week.tg || null },

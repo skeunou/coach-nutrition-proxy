@@ -77,7 +77,7 @@ function gainHyst(ss) {
 function samples(streams, minSpeed) {
   const T = S(streams, "time"); if (!T || T.length < 10) return [];
   const V = S(streams, "velocity_smooth"), G = S(streams, "grade_smooth"), A = S(streams, "altitude");
-  const H = S(streams, "heartrate"), C = S(streams, "cadence"), M = S(streams, "moving"), D = S(streams, "distance");
+  const H = S(streams, "heartrate"), C = S(streams, "cadence"), M = S(streams, "moving"), D = S(streams, "distance"), Wt = S(streams, "watts");
   const out = []; let tm = 0;
   for (let i = 1; i < T.length; i++) {
     let dt = T[i] - T[i - 1];
@@ -91,7 +91,7 @@ function samples(streams, minSpeed) {
       t: tm, dt, v: v || 0, g: G ? G[i] : 0,
       dAlt: A ? A[i] - A[i - 1] : 0, alt: A ? A[i] : null,
       dd: D ? Math.max(0, D[i] - D[i - 1]) : (v || 0) * dt, dist: D ? D[i] : null,
-      hr: H && H[i] > 40 ? H[i] : null, cad: C && C[i] > 0 ? C[i] : null,
+      hr: H && H[i] > 40 ? H[i] : null, cad: C && C[i] > 0 ? C[i] : null, w: Wt && Wt[i] != null ? Wt[i] : null,
     });
   }
   return out;
@@ -166,6 +166,13 @@ function runMetrics(streams) {
   const steady = cv != null && cv < 0.12;
   const hv = tMove >= 35 * 60 ? halves(ss, gapV, 300) : null;
   const dec = hv && hv.a.ef && hv.b.ef ? ((hv.a.ef - hv.b.ef) / hv.a.ef) * 100 : null;
+  // Gestion d'allure : 2e moitié vs 1re en VAP (+ = ralentissement), dès 20 min
+  const hs = tMove >= 20 * 60 ? halves(ss, gapV, 120) : null;
+  const splitPct = hs && hs.a.v && hs.b.v ? (hs.a.v / hs.b.v - 1) * 100 : null;
+  // FC accrochée à la cadence (artefact du capteur au poignet) : FC ≈ pas/min sur une bonne part du temps
+  const hrS = ss.filter((p) => p.hr && p.cad);
+  const lock = hrS.filter((p) => p.hr >= 145 && Math.abs(p.hr - p.cad * 2) <= 3).length;
+  const hrSuspect = hrS.length > 60 && lock / hrS.length > 0.3;
 
   const cl = climbs(ss);
   const clGain = cl.reduce((a, s) => a + s.gain, 0), clTime = cl.reduce((a, s) => a + s.time, 0);
@@ -198,7 +205,9 @@ function runMetrics(streams) {
     zones: zonesPct(ss),
     variability: r2(cv), steady,
     decoupling: dec != null ? r1(dec) : null,
-    decouplingValid: dec != null && steady,
+    decouplingValid: dec != null && steady && !hrSuspect,
+    splitPct: splitPct != null ? r1(splitPct) : null,
+    hrSuspect,
     halves: hv ? { hr1: r0(hv.a.hr), hr2: r0(hv.b.hr), pace1: paceStr(hv.a.v), pace2: paceStr(hv.b.v) } : null,
     climb: clGain >= 25 ? {
       n: cl.length, gain: r0(clGain), min: r0(clTime / 60), vam: r0((clGain / clTime) * 3600),
@@ -212,7 +221,7 @@ function runMetrics(streams) {
 
 /* ---------- VÉLO ---------- */
 const CAD_BUCKETS = [[0, 60], [60, 70], [70, 80], [80, 90], [90, 100], [100, 999]];
-function rideMetrics(streams, target) {
+function rideMetrics(streams, target, pTarget) {
   const ss = samples(streams, 0.3);
   if (ss.length < 30) return null;
   const tMove = ss[ss.length - 1].t;
@@ -228,13 +237,22 @@ function rideMetrics(streams, target) {
   const drift = hv && hv.a.hr && hv.b.hr ? ((hv.b.hr - hv.a.hr) / hv.a.hr) * 100 : null;
   const dec = hv && hv.a.ef && hv.b.ef ? ((hv.a.ef - hv.b.ef) / hv.a.ef) * 100 : null;
   const dPlus = gainHyst(ss);
+  // Puissance (capteur du home-trainer) : moyenne en pédalant (w > 0), % du temps dans la cible, W/bpm
+  const pw = ss.filter((p) => p.w != null && p.w > 0 && p.cad);
+  const pwT = pw.reduce((a, p) => a + p.dt, 0);
+  const watts = pwT >= 300 ? wmean(pw.map((p) => [p.w, p.dt])) : null;
+  const inPower = watts != null && pTarget ? r0((pw.filter((p) => p.w >= pTarget[0] && p.w <= pTarget[1]).reduce((a, p) => a + p.dt, 0) / pwT) * 100) : null;
+  const pShare = (f) => r0((pw.filter(f).reduce((a, p) => a + p.dt, 0) / (pwT || 1)) * 100);
+  const pBelow = watts != null && pTarget ? pShare((p) => p.w < pTarget[0]) : null, pAbove = watts != null && pTarget ? pShare((p) => p.w > pTarget[1]) : null;
+  const wPerBeat = watts && hr ? watts / hr : null;
 
   const series = []; let acc = null;
   ss.forEach((p) => {
-    if (!acc) acc = { t0: p.t, c: 0, cT: 0, h: 0, hT: 0 };
+    if (!acc) acc = { t0: p.t, c: 0, cT: 0, h: 0, hT: 0, w: 0, wT: 0 };
     if (p.cad) { acc.c += p.cad * p.dt; acc.cT += p.dt; }
     if (p.hr) { acc.h += p.hr * p.dt; acc.hT += p.dt; }
-    if (p.t - acc.t0 >= 60) { series.push({ x: p.t / 60, cad: acc.cT ? acc.c / acc.cT : null, hr: acc.hT ? acc.h / acc.hT : null }); acc = null; }
+    if (p.w != null && p.w > 0) { acc.w += p.w * p.dt; acc.wT += p.dt; }
+    if (p.t - acc.t0 >= 60) { series.push({ x: p.t / 60, cad: acc.cT ? acc.c / acc.cT : null, hr: acc.hT ? acc.h / acc.hT : null, w: acc.wT ? acc.w / acc.wT : null }); acc = null; }
   });
 
   return {
@@ -243,6 +261,7 @@ function rideMetrics(streams, target) {
     kmh: r1((dist / tMove) * 3.6),
     cadence: r0(cad), cadenceSd: r0(sdCad), coastPct: r0((1 - pedT / tMove) * 100),
     cadenceHist: hist, target, inTarget,
+    watts: r0(watts), pTarget: watts != null ? pTarget : null, inPower, pBelow, pAbove, wPerBeat: wPerBeat ? r2(wPerBeat) : null,
     hr: r0(hr), hrPctMax: hr ? r0((hr / FCMAX) * 100) : null,
     zones: zonesPct(ss),
     hrDrift: drift != null ? r1(drift) : null,
@@ -252,12 +271,25 @@ function rideMetrics(streams, target) {
   };
 }
 
+/* Cible de puissance : « 150-160 W », « puissance 150-160 », « P : 150-160 », « 150 W » (±5) */
+function powerTarget(...texts) {
+  for (const t of texts) {
+    if (!t) continue;
+    const s = String(t).replace(/<[^>]+>/g, " ");
+    let m = /(\d{2,3})\s*[-–à]\s*(\d{2,3})\s*(?:w|watts?)\b/i.exec(s) || /\b(?:puiss\w*|pw|p)\b[^0-9]{0,14}(\d{2,3})\s*(?:[-–à]|et)\s*(\d{2,3})/i.exec(s);
+    if (m) { const a = +m[1], b = +m[2]; if (a >= 50 && b <= 600 && b > a) return [a, b]; }
+    m = /(\d{2,3})\s*(?:w|watts?)\b/i.exec(s);
+    if (m) { const v = +m[1]; if (v >= 50 && v <= 600) return [v - 5, v + 5]; }
+  }
+  return null;
+}
+
 /* Cible de cadence : « cadence 85-95 » dans la description, sinon plan (« 75-80 tr/min ») */
 function cadenceTarget(...texts) {
   for (const t of texts) {
     if (!t) continue;
     const s = String(t).replace(/<[^>]+>/g, " ");
-    let m = /\bcad(?:ence)?\b[^0-9]{0,12}(\d{2,3})\s*[-–à]\s*(\d{2,3})/i.exec(s) || /(\d{2,3})\s*[-–à]\s*(\d{2,3})\s*(?:tr\/?\s?min|rpm)/i.exec(s);
+    let m = /\bcad(?:ence)?\b[^0-9]{0,12}(\d{2,3})\s*[-–à]\s*(\d{2,3})/i.exec(s) || /(\d{2,3})\s*[-–à]\s*(\d{2,3})\s*(?:de\s+|d')?cad/i.exec(s) || /(\d{2,3})\s*[-–à]\s*(\d{2,3})\s*(?:tr\/?\s?min|rpm)/i.exec(s);
     if (m) { const a = +m[1], b = +m[2]; if (a >= 40 && b <= 130 && b > a) return [a, b]; }
     // valeur unique : « 55 tr/min », « cadence 90 », « 55 tours » → ±5
     m = /(\d{2,3})\s*(?:tr\/?\s?min|rpm|tours?\b)/i.exec(s) || /\bcad(?:ence)?\b[^0-9]{0,12}(\d{2,3})\b/i.exec(s);
@@ -274,4 +306,4 @@ function userNote(desc) {
   return s.slice(0, 280);
 }
 
-module.exports = { OPT, classify, runMetrics, rideMetrics, cadenceTarget, userNote, gapFactor, paceStr, ZONES, FCMAX };
+module.exports = { OPT, powerTarget, classify, runMetrics, rideMetrics, cadenceTarget, userNote, gapFactor, paceStr, ZONES, FCMAX };

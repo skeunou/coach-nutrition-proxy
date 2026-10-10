@@ -146,7 +146,7 @@ function sessionRide(m) {
   if (sr.length < 4) return null;
   const xs = sr.map((p) => p.x), xMax = Math.max(...xs);
   const cad = sr.map((p) => p.cad), hr = sr.map((p) => p.hr);
-  const H = 312, x0 = 38, w = W - x0 - 14;
+  const x0 = 38, w = W - x0 - 14;
   const cv = cad.filter((v) => v != null);
   const cvs = cv.slice().sort((p, q) => p - q);
   const cLo = Math.floor(Math.min(m.target ? m.target[0] : 1e9, cvs[Math.floor(cvs.length * 0.03)]) / 5) * 5 - 5;
@@ -154,12 +154,23 @@ function sessionRide(m) {
   let s = panel({ x0, y0: 76, w, h: 92, xs, ys: cad, yLo: cLo, yHi: cHi, color: C.acc, fmt: (v) => v,
     band: m.target, bandColor: C.acc, label: "Cadence (tr/min)" + (m.target ? ` · bande = cible ${m.target[0]}-${m.target[1]}` : ""), xMax });
   const hv = hr.filter((v) => v != null);
+  let y = 202;
   if (hv.length) {
     const lo = Math.floor(Math.min(...hv) / 5) * 5 - 5, hi = Math.max(lo + 30, Math.ceil(Math.max(...hv) / 5) * 5 + 5);
-    s += panel({ x0, y0: 202, w, h: 70, xs, ys: smooth(hr, 1), yLo: lo, yHi: hi, color: C.acc2, fmt: (v) => v, band: [125, 143], bandColor: C.grn, label: "FC (bpm)" + (hi > 125 ? " · vert = Z2" : ""), xMax });
+    s += panel({ x0, y0: y, w, h: 70, xs, ys: smooth(hr, 1), yLo: lo, yHi: hi, color: C.acc2, fmt: (v) => v, band: [125, 143], bandColor: C.grn, label: "FC (bpm)" + (hi > 125 ? " · vert = Z2" : ""), xMax });
+    y += 104;
   }
-  s += xAxis(x0, 290, w, xMax, "min");
-  return frame(H, "Ta séance", `${m.movingMin} min · cad. moy ${m.cadence} · FC moy ${m.hr || "—"}`, s);
+  // 3e panneau : puissance (si le home-trainer la mesure), bande = cible
+  const pwr = sr.map((p) => p.w), pv = pwr.filter((v) => v != null);
+  if (pv.length >= 4 && m.watts != null) {
+    const ps = pv.slice().sort((p, q) => p - q);
+    const lo = Math.floor(Math.min(m.pTarget ? m.pTarget[0] : 1e9, ps[Math.floor(ps.length * 0.03)]) / 10) * 10 - 10;
+    const hi = Math.ceil(Math.max(m.pTarget ? m.pTarget[1] : 0, ps[Math.floor(ps.length * 0.97)]) / 10) * 10 + 10;
+    s += panel({ x0, y0: y, w, h: 70, xs, ys: smooth(pwr, 1), yLo: lo, yHi: hi, color: "#7dd3fc", fmt: (v) => v, band: m.pTarget, bandColor: "#7dd3fc", label: "Puissance (W)" + (m.pTarget ? ` · bande = cible ${m.pTarget[0]}-${m.pTarget[1]}` : ""), xMax });
+    y += 104;
+  }
+  s += xAxis(x0, y - 16, w, xMax, "min");
+  return frame(y + 6, "Ta séance", `${m.movingMin} min · cad. moy ${m.cadence}${m.watts != null ? " · " + m.watts + " W" : ""} · FC moy ${m.hr || "—"}`, s);
 }
 
 /* ---------- 3. Comparaison des dernières séances (barres) ---------- */
