@@ -4,12 +4,22 @@
 
 [functions]
   node_bundler = "esbuild"
+  # resvg (rendu PNG des graphiques du rapport) = module natif : non bundlé par esbuild
+  external_node_modules = ["@resvg/resvg-js", "@resvg/resvg-js-linux-x64-gnu"]
 
-[functions."weekly-recap"]
-  schedule = "0 17,18 * * 0"
+[functions."daily-report"]
+  # Rapport du soir — 21h Paris (19h UTC en été, 20h UTC en hiver ; la fonction filtre sur l'heure de Paris)
+  schedule = "0 19,20 * * *"
+  included_files = ["node_modules/@resvg/resvg-js-linux-x64-gnu/**"]
+
+# [functions."weekly-recap"]
+#   EN SOMMEIL (oct. 2026) — remplacé par daily-report. Code conservé, appel manuel toujours possible.
+#   schedule = "0 17,18 * * 0"
 
 [functions."daily-push"]
   schedule = "0 4,5 * * *"
 
-[functions."daily-session"]
-  schedule = "0 2,3 * * *"
+# [functions."daily-session"]
+#   EN SOMMEIL (oct. 2026) — mail « séance du jour » 4h retiré à la demande de Laurent.
+#   (Il plantait depuis l'ajout de raceWin() dans trail-v2 : fonction non extraite par son moteur.)
+#   schedule = "0 2,3 * * *"
