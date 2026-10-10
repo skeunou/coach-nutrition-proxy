@@ -223,7 +223,7 @@ function cadenceHist(m) {
     }
     return { label: labels[i], v, score: v > 0 ? score : null, today: false };
   });
-  return bars("Répartition de ta cadence", m.target ? `% du temps pédalé · vert = ta cible ${m.target[0]}-${m.target[1]}, rouge = loin` : "% du temps pédalé",
+  return bars("Répartition de ta cadence", m.target ? `% du temps pédalé · vert = ta cible ${m.target[0]}-${m.target[1]}, rouge = loin` : "% du temps · pas de cible notée (écris « Cad : 85-95 »)",
     items, { zero: true, solid: true, fmt: (v) => Math.round(v) + "%" });
 }
 

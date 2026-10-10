@@ -257,10 +257,10 @@ function cadenceTarget(...texts) {
   for (const t of texts) {
     if (!t) continue;
     const s = String(t).replace(/<[^>]+>/g, " ");
-    let m = /cadence[^0-9]{0,12}(\d{2,3})\s*[-–à]\s*(\d{2,3})/i.exec(s) || /(\d{2,3})\s*[-–à]\s*(\d{2,3})\s*(?:tr\/?\s?min|rpm)/i.exec(s);
+    let m = /\bcad(?:ence)?\b[^0-9]{0,12}(\d{2,3})\s*[-–à]\s*(\d{2,3})/i.exec(s) || /(\d{2,3})\s*[-–à]\s*(\d{2,3})\s*(?:tr\/?\s?min|rpm)/i.exec(s);
     if (m) { const a = +m[1], b = +m[2]; if (a >= 40 && b <= 130 && b > a) return [a, b]; }
     // valeur unique : « 55 tr/min », « cadence 90 », « 55 tours » → ±5
-    m = /(\d{2,3})\s*(?:tr\/?\s?min|rpm|tours?\b)/i.exec(s) || /cadence[^0-9]{0,12}(\d{2,3})\b/i.exec(s);
+    m = /(\d{2,3})\s*(?:tr\/?\s?min|rpm|tours?\b)/i.exec(s) || /\bcad(?:ence)?\b[^0-9]{0,12}(\d{2,3})\b/i.exec(s);
     if (m) { const v = +m[1]; if (v >= 40 && v <= 130) return [v - 5, v + 5]; }
   }
   return null;

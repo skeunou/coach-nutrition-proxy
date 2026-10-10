@@ -18,7 +18,7 @@ const INTENTS = [
   ["long", /sortie longue|\bsl\b|\blongue\b/],
   ["threshold", /seuil|tempo|allure (marathon|semi)/],
   ["intervals", /fractionn|\bvma\b|interval|\bcotes?\b|\d+\s*[x×*]\s*\d|30\s*\/\s*30|pyramide/],
-  ["recovery", /recup|decrass|souple|regener|tres facile/],
+  ["recovery", /recup|decrass|souple|regener|tres facile|tourner les jambes|deverrouill|activation|veille (de|d)/],
   ["easy", /footing|facile|\bef\b|endurance|\bz2\b|blabla|tranquille|cool/],
   ["strength", /renfo|trepied|gainage|muscu/],
   ["rest", /\brepos\b/],
@@ -29,13 +29,25 @@ function intentOf(text) { const t = norm(text); for (const [k, re] of INTENTS) i
 /* ---------- Note Strava : « intention, RPE x, pubis … » (tout est optionnel) ---------- */
 function parseNote(note) {
   const raw = strip(note), t = norm(raw);
-  const out = { raw, intent: null, rpe: null, pubis: null };
+  const out = { raw, intent: null, rpe: null, pubis: null, legs: null };
   if (!raw) return out;
   // intention = le premier morceau avant « RPE » / « pubis », sinon toute la note
   const head = raw.split(/[,;.\n]|\brpe\b|\bpubis\b/i)[0];
   out.intent = intentOf(head) || intentOf(raw);
-  let m = /\brpe\s*[:=]?\s*(\d+(?:[.,]\d)?)/.exec(t) || /\b(\d+(?:[.,]\d)?)\s*\/\s*10\b(?![^,;]*pubis)/.exec(t.replace(/pubis[^,;]*/g, ""));
+  // « Jambe(s) : 6/10 » = sensation des jambes (échelle de Laurent), jamais confondue avec le RPE
+  let lg = /\bjambes?\s*:?\s*(\d+(?:[.,]\d)?)\s*\/\s*10/.exec(t);
+  if (lg) out.legs = parseFloat(lg[1].replace(",", "."));
+  // RPE : « RPE 6 », sinon un « x/10 » qui n'est ni pubis/ZP ni jambes
+  const tR = t.replace(/(pubis|\bzp\b|jambes?)[^,;\n]*/g, "");
+  let m = /\brpe\s*[:=]?\s*(\d+(?:[.,]\d)?)/.exec(t) || /\b(\d+(?:[.,]\d)?)\s*\/\s*10\b/.exec(tR);
   if (m) { const v = parseFloat(m[1].replace(",", ".")); if (v >= 0 && v <= 10) out.rpe = v; }
+  // « ZP pré : 3/10 », « ZP post : 3/10 » (zone pubienne) → on garde le niveau le plus haut
+  const zps = [...t.matchAll(/\bzp\s*(pre|post|avant|apres)?\s*:?\s*(\d+(?:[.,]\d)?)\s*\/\s*10/g)];
+  if (zps.length) {
+    const lv = Math.max(...zps.map((z) => parseFloat(z[2].replace(",", "."))));
+    out.pubis = { level: lv, txt: zps.map((z) => "ZP " + (z[1] ? z[1].replace("pre", "pré").replace("apres", "après") + " " : "") + z[2] + "/10").join(", "), where: zps.length > 1 ? "avant → après la séance" : null };
+    return out;
+  }
   m = /pubis\s*:?\s*([^,;.\n]*)/.exec(t);
   if (m) {
     const s = m[1].trim();
@@ -154,7 +166,7 @@ function userPrompt(ctx) {
     L.push("");
     L.push(`=== SÉANCE : « ${x.a.name} » (${x.typeLbl}) ===`);
     L.push(`Intention retenue : ${x.intent ? INTENT_LBL[x.intent] : "inconnue"} (source : ${x.intentSrc}).`);
-    L.push(x.note && x.note.raw ? `Note de Laurent : "${x.note.raw}"` + (x.note.rpe != null ? ` → RPE ${x.note.rpe}/10.` : " → pas de RPE.") : "Note de Laurent : aucune.");
+    L.push(x.note && x.note.raw ? `Note de Laurent : "${x.note.raw}"` + (x.note.rpe != null ? ` → RPE ${x.note.rpe}/10.` : " → pas de RPE.") + (x.note.legs != null ? ` Sensation jambes ${x.note.legs}/10 (son échelle personnelle : ne l'interprète pas comme un RPE).` : "") + (x.note.pubis && x.note.pubis.level != null ? ` Pubis (ZP) : ${x.note.pubis.txt}.` : "") : "Note de Laurent : aucune.");
     L.push("DIAGNOSTIC (priorité décroissante) :");
     (x.diag.length ? x.diag.slice(0, 5) : [{ tone: "neutre", t: "Aucun constat marquant." }]).forEach((c, i) => L.push(`${i + 1}. [${c.tone}] ${c.t}`));
     L.push("Faits complémentaires :");
