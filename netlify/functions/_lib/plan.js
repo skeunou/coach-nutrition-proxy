@@ -34,7 +34,7 @@ function extractDecl(src, name) {
 
 // rebuildBlocks : construit les blocs dynamiques de reprise (attente / fractionné / réintroduction / pont)
 // à partir du J0 — sans lui, tout ce qui suit le 9 nov. 2026 apparaissait en « Repos ».
-const SEED = ["gen", "blockFor", "weekTarget", "weekInfo", "nextRace", "rebuildBlocks"];
+const SEED = ["gen", "blockFor", "weekTarget", "weekInfo", "nextRace", "rebuildBlocks", "RACES", "REP_MILES", "repJ0"];
 // localStorage simulé : alimenté avec l'état synchronisé de l'app (lv-data) → J0 de reprise, VMA…
 const PRELUDE = `
   var today = new Date();
@@ -56,7 +56,8 @@ function buildEngine(html, storage) {
     const code = "var __LS__=" + JSON.stringify(storage || {}) + ";" + PRELUDE + decl.join("\n") +
       `;if(typeof rebuildBlocks==="function")rebuildBlocks();` +
       `(function(){return{setDay:function(d){today=d;},gen:gen,blockFor:blockFor,` +
-      `weekTarget:(typeof weekTarget==="function"?weekTarget:null)};})()`;
+      `weekTarget:(typeof weekTarget==="function"?weekTarget:null),` +
+      `cal:function(){return{blocks:BLOCKS,races:(typeof RACES!=="undefined"?RACES:[]),miles:(typeof REP_MILES!=="undefined"?REP_MILES:{}),j0:(typeof repJ0==="function"?repJ0():null)};}};})()`;
     eng = (0, eval)(code);
   }
   // Exécute fn(eng) ; sur « X is not defined », extrait X du HTML et recommence.
@@ -97,4 +98,21 @@ function plannedFor(engine, ymd) {
   });
 }
 
-module.exports = { buildEngine, plannedFor };
+/* Calendrier complet (source : le plan de l'app) → texte pour le coach.
+   Blocs en cours et à venir, courses à venir, jalons, J0 de reprise course. */
+function calendar(engine, ymd) {
+  const c = engine.call((eng) => eng.cal());
+  const fr = (d) => { const p = String(d).split("-").map(Number); return p[2] + "/" + p[1] + "/" + String(p[0]).slice(2); };
+  const strip = (t) => String(t || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+  const L = [];
+  if (c.j0) L.push(`Reprise de la course à pied (J0) : ${fr(c.j0)}. Avant cette date : AUCUNE course à pied, sauf une course listée ci-dessous avant le J0 (déjà validée par Laurent et son médecin, à faire en gestion).`);
+  const blocks = (c.blocks || []).filter((b) => b.end >= ymd);
+  if (blocks.length) L.push("BLOCS (en cours puis à venir) :\n" + blocks.map((b) => `- ${fr(b.start)} → ${fr(b.end)} : ${b.name}${b.start <= ymd ? " [EN COURS]" : ""} — ${strip(b.intent)}`).join("\n"));
+  const races = (c.races || []).filter((r) => r.d >= ymd);
+  if (races.length) L.push("COURSES À VENIR :\n" + races.map((r) => `- ${fr(r.d)} : ${r.n} (${r.km} km, ${r.dp} m D+) — ${strip(r.role)}`).join("\n"));
+  const miles = Object.keys(c.miles || {}).filter((d) => d >= ymd).sort();
+  if (miles.length) L.push("JALONS :\n" + miles.map((d) => `- ${fr(d)} : ${strip(c.miles[d]).replace(/^📍\s*JALON\s*—\s*/, "")}`).join("\n"));
+  return { j0: c.j0 || null, text: L.join("\n\n") };
+}
+
+module.exports = { buildEngine, plannedFor, calendar };

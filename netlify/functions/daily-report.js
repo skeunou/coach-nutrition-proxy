@@ -334,6 +334,8 @@ exports.handler = async (event) => {
   let oldRefs = null; try { oldRefs = (await ST.readJson("coach/refs.json")).data; } catch (e) {}
   if (oldRefs) storage["coach:refs:v1"] = JSON.stringify(oldRefs);
   try { const app = await get(APP.host, APP.path); if (app.status === 200) { engine = P.buildEngine(app.raw, storage); plan = P.plannedFor(engine, ymd); } } catch (e) { plan = null; }
+  let cal = null; try { if (engine) cal = P.calendar(engine, ymd); } catch (e) { cal = null; }
+  let profil = null; try { const pr = (await ST.readJson("coach/profil.json")).data; profil = pr && pr.text ? String(pr.text) : null; } catch (e) {}
   const planTxt = plan ? [plan.label, plan.sub].concat(plan.specs || [], plan.detail || []).map(strip).join(" · ") : "";
 
   // Détail (description) des activités du jour + streams
@@ -427,7 +429,7 @@ exports.handler = async (event) => {
   const recur = K.recurrences(mem, ymd, todayKeys);
   mem.byDay[ymd] = todayKeys;
   const cutoff = addDays(ymd, -120); Object.keys(mem.byDay).forEach((d) => { if (d < cutoff) delete mem.byDay[d]; });
-  const cctx = { dateLbl: frLong(ymd), plan, tomorrow, last3, week, items, special, recur };
+  const cctx = { dateLbl: frLong(ymd), plan, tomorrow, last3, week, items, special, recur, profil, calendar: cal && cal.text };
   const facts = [
     `Date : ${frLong(ymd)}`,
     plan ? `Séance prévue au plan aujourd'hui : ${strip(plan.label)}${plan.sub ? " — " + strip(plan.sub) : ""}${plan.block ? " (bloc : " + plan.block + ")" : ""}.` + (plan.detail && plan.detail.length ? " Détail : " + plan.detail.map(strip).join(" | ") : "") : "Plan du jour : indisponible.",
@@ -464,6 +466,7 @@ exports.handler = async (event) => {
     if (q.store === "1") {
       const w = await ST.writeReport(ymd, rpt); rpt.stored = w.ok; if (!w.ok) rpt.storeError = w;
       if (pRef) await ST.writeJson("coach/refs.json", refs, "coach refs " + ymd);
+      if (cal && cal.text) await ST.writeJson("coach/calendrier.json", { ymd, j0: cal.j0, text: cal.text }, "coach calendrier " + ymd);
       mem.titles = mem.titles || {}; mem.titles[ymd] = rep.titre + (rep.demain ? " — demain : " + rep.demain : "");
       Object.keys(mem.titles).forEach((d) => { if (d < cutoff) delete mem.titles[d]; });
       mem.updated = new Date().toISOString(); await ST.writeJson("coach/memoire.json", mem, "coach mémoire " + ymd);

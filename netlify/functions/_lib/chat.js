@@ -33,8 +33,8 @@ const sd = (d) => { const p = d.split("-").map(Number); return p[2] + "/" + p[1]
 
 const PROFILE = [
   "Profil : Laurent, infirmier libéral (horaires irréguliers, lever souvent à 4h), athlète diesel d'ultra-endurance, VO2max 56, VMA de travail 16,5, FCmax 179. Objectif UT4M 180 (juillet 2027). Limiteurs : économie de grimpe (VAM), durabilité en descente.",
+  "Course à pied : JAMAIS avant le J0 de reprise indiqué dans le CALENDRIER (sauf course déjà listée avant). ",
   "Santé : pubalgie réveillée fin septembre 2026, infiltration mi-octobre, reprise très progressive (programme Fractionné de La Clinique du Coureur, trépied adducteurs/transverse/fessiers). Règle douleur : ≤ 2/10 pendant ET normale le lendemain matin. Exclus pendant la reprise : sauts, fentes, squat dynamique, hinge lourd, gros braquet/SFR, étirements forcés des adducteurs. Le kiné et le médecin priment.",
-  "CALENDRIER DE REPRISE (validé par Laurent le 10/10/2026) : AUCUNE course à pied avant le lundi 7 décembre 2026 — ne jamais proposer footing, côtes ou fractionné avant cette date (seulement home-trainer souple, renfo compatible pubis, marche). 7-27 déc. : programme Fractionné II (15 séances, 5/sem, jusqu'à 30′ continu, plat uniquement). 28 déc.-24 janv. : réintroduction terrain (montée d'abord, descente en dernier). 25 janv.-14 févr. : base progressive, puis plan UT4M. Jalon GO/NO-GO Maquisards le 4 janv. Objectif : course continue sur le plat début janvier, tout terrain fin janvier.",
   "Zones FC course : Z1 < 125, Z2 125-143, Z3 143-152, Z4 152-162, Z5 > 162. Vélo : ~10 bpm plus bas.",
   "Matériel : barre + disques, haltères 5/10/15 kg, kettlebell 12-24 kg, TRX + barre de traction, banc, box 51/61/76 cm, élastiques, tapis de course (max 15 %), home-trainer avec puissance, vélo de route, bâtons.",
   "Créneaux habituels : lundi midi EF club, mardi soir côtes club, mercredi variable, jeudi 12h-14h qualité, vendredi renfo, dimanche sortie longue. Renfo 45 min max.",
@@ -56,15 +56,17 @@ const SYS = [
 ].join("\n");
 
 async function load(ymd) {
-  const [rep, chat, mem] = await Promise.all([ST.readReport(ymd), ST.readJson(PATH), ST.readJson("coach/memoire.json")]);
-  return { report: rep.report || null, chat: (chat.data && chat.data.msgs) ? chat.data : { msgs: [], perDay: {} }, mem: mem.data || null };
+  const [rep, chat, mem, cal, pro] = await Promise.all([ST.readReport(ymd), ST.readJson(PATH), ST.readJson("coach/memoire.json"), ST.readJson("coach/calendrier.json"), ST.readJson("coach/profil.json")]);
+  return { report: rep.report || null, chat: (chat.data && chat.data.msgs) ? chat.data : { msgs: [], perDay: {} }, mem: mem.data || null, cal: cal.data || null, profil: pro.data && pro.data.text ? String(pro.data.text) : null };
 }
 
-function contextText(ymd, report, mem) {
+function contextText(ymd, report, mem, cal, profil) {
   const L = [];
+  if (profil) L.push("FICHE ATHLÈTE (validée par Laurent) :\n" + profil);
+  if (cal && cal.text) L.push("CALENDRIER (issu de son plan, à jour au " + sd(cal.ymd) + ") :\n" + cal.text);
   if (report && report.status === "ok") {
     L.push(`RAPPORT DU ${sd(ymd)} (ce que tu lui as écrit) : ${report.coach.titre}. ${report.coach.passe} ${report.coach.sens} Demain : ${report.coach.demain}`);
-    if (report.prompt) L.push("DONNÉES DE CE JOUR (calculées, fiables) :\n" + report.prompt.replace(/\nRédige le compte-rendu\.?$/, ""));
+    if (report.prompt) L.push("DONNÉES DE CE JOUR (calculées, fiables) :\n" + report.prompt.replace(/\nRédige le compte-rendu\.?$/, "").replace(/FICHE ATHLÈTE \(validée par Laurent\) :\n[\s\S]*?\n(?=PLAN DU JOUR)/, ""));
   } else if (report && report.status === "empty") L.push(`Le ${sd(ymd)} : aucune activité enregistrée.`);
   else L.push(`Pas de rapport disponible pour le ${sd(ymd)}.`);
   if (mem && mem.titles) {
@@ -90,7 +92,7 @@ async function ask({ ymd, question, deep, deadline }) {
   const st = await load(ymd);
   const used = (st.chat.perDay && st.chat.perDay[today]) || 0;
   if (used >= LIMIT) return { error: "limite", remaining: 0, message: `Tu as posé tes ${LIMIT} questions du jour. Reprends demain.` };
-  const ctx = contextText(ymd, st.report, st.mem);
+  const ctx = contextText(ymd, st.report, st.mem, st.cal, st.profil);
   const thread = st.chat.msgs.slice(-16).map((m) => ({ role: m.role === "user" ? "user" : "assistant", content: (m.role === "user" ? `[${sd(m.ymd || today)}] ` : "") + m.t }));
   // L'API exige l'alternance user/assistant et un 1er message user : on fusionne si besoin
   const msgs = [];
