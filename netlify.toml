@@ -16,6 +16,10 @@
   # Porte HTTP du rapport (une fonction planifiée répond 403 en direct)
   included_files = ["node_modules/@resvg/resvg-js-linux-x64-gnu/**"]
 
+[functions."report-send-background"]
+  # Envoi manuel du vrai mail (arrière-plan, 15 min max)
+  included_files = ["node_modules/@resvg/resvg-js-linux-x64-gnu/**"]
+
 # [functions."weekly-recap"]
 #   EN SOMMEIL (oct. 2026) — remplacé par daily-report. Code conservé, appel manuel toujours possible.
 #   schedule = "0 17,18 * * 0"
