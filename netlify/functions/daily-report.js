@@ -163,13 +163,15 @@ const SYS = [
   "Réponds UNIQUEMENT en JSON valide, sans markdown : {\"titre\": \"verdict en 8 mots max\", \"analyse\": \"5 à 8 phrases de prose continue\", \"conseils\": [\"2 ou 3 actions concrètes et chiffrées pour les prochaines séances\"]}",
 ].join("\n");
 
-async function coach(facts, skipLLM) {
+async function coach(facts, skipLLM, deadline) {
+  const budget = deadline ? deadline - Date.now() - 400 : 20000;
+  if (budget < 2500) return null; // plus le temps (aperçu HTTP limité à 10 s)
   if (!skipLLM && process.env.ANTHROPIC_API_KEY_NUTRITION) {
     try {
       const r = await post("api.anthropic.com", "/v1/messages", {
         model: "claude-haiku-4-5", max_tokens: 1100, system: SYS,
         messages: [{ role: "user", content: "DONNÉES MESURÉES (n'utilise rien d'autre) :\n\n" + facts + "\n\nRédige le rapport." }],
-      }, { "x-api-key": process.env.ANTHROPIC_API_KEY_NUTRITION, "anthropic-version": "2023-06-01" }, 20000);
+      }, { "x-api-key": process.env.ANTHROPIC_API_KEY_NUTRITION, "anthropic-version": "2023-06-01" }, Math.min(20000, budget));
       let t = r.json && r.json.content ? r.json.content.map((c) => c.text || "").join("").trim() : "";
       const mm = t.match(/```(?:json)?\s*([\s\S]*?)```/); if (mm) t = mm[1];
       const s = t.indexOf("{"), e = t.lastIndexOf("}");
@@ -182,7 +184,7 @@ async function coach(facts, skipLLM) {
   return null;
 }
 /* Repli 100 % calculé si Haiku indisponible : constats factuels, zéro invention */
-function fallback(items) {
+function fallback(items, outOfTime) {
   const bits = [], tips = [];
   items.forEach(({ m, cls }) => {
     if (!m) return;
@@ -196,7 +198,7 @@ function fallback(items) {
       if (m.target && m.inTarget < 70) tips.push(`Vise plus de 80 % du temps dans ta cible ${m.target[0]}-${m.target[1]} tr/min.`);
     }
   });
-  return { titre: "Les chiffres du jour", analyse: (bits.join(" ") || "Séance enregistrée.") + " (Analyse automatique : le coach IA n'a pas répondu ce soir.)", conseils: tips.slice(0, 3), src: "calc" };
+  return { titre: "Les chiffres du jour", analyse: (bits.join(" ") || "Séance enregistrée.") + (outOfTime ? " (Aperçu : coach IA sauté faute de temps — le mail de 21h a 30 s et l'inclura.)" : " (Analyse automatique : le coach IA n'a pas répondu ce soir.)"), conseils: tips.slice(0, 3), src: "calc" };
 }
 
 /* ---------- Graphiques ---------- */
@@ -325,7 +327,7 @@ exports.handler = async (event) => {
     histBy[f] = sel; sel.forEach((a) => { if (!want.includes(a)) want.push(a); });
   });
   const computed = new Map();
-  await pool(want, 5, async (a) => { const st = await streams(token, a.id); computed.set(a.id, Object.assign({ day: dayOf(a) }, analyse(a, st, ""))); });
+  await pool(want, 8, async (a) => { const st = await streams(token, a.id); computed.set(a.id, Object.assign({ day: dayOf(a) }, analyse(a, st, ""))); });
   const histFor = (f) => (histBy[f] || []).map((a) => computed.get(a.id)).filter((h) => h && h.m);
 
   // Graphiques
@@ -349,7 +351,8 @@ exports.handler = async (event) => {
     `Semaine en cours (lundi → aujourd'hui) : ${week.km} km course/trail, ${week.dp} m D+, ${week.ride} min de vélo` + (week.tg && week.tg.km ? ` ; cible du plan ${week.tg.km} km / ${week.tg.dp} m D+.` : "."),
     "",
   ].concat(items.map((x) => factsFor(x, histFor(x.cls.fam)))).join("\n");
-  const rep = (await coach(facts, q.nollm === "1")) || fallback(items);
+  const deadline = event && event.lvDeadline;
+  const rep = (await coach(facts, q.nollm === "1", deadline)) || fallback(items, deadline && Date.now() > deadline - 2900);
 
   const ctx = { ymd, items, rep, plan, week, imgs };
   const subject = "🏔️ " + frDate(ymd) + " — " + items.map((x) => x.m ? (x.m.kind === "run" ? `${x.typeLbl} ${x.m.km} km` : `${x.typeLbl.split(" · ")[1] === "home-trainer" ? "HT" : "Vélo"} ${x.m.movingMin}′`) : x.typeLbl).join(" · ") + (rep.titre ? " — " + rep.titre : "");
