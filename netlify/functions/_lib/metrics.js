@@ -67,6 +67,12 @@ function wmean(pairs) { let a = 0, w = 0; pairs.forEach(([v, d]) => { if (v != n
 function zoneOf(h) { for (let z = 0; z < ZONES.length; z++) if (h < ZONES[z].hi) return z; return 4; }
 function paceStr(mps) { if (!mps || mps <= 0) return "—"; const s = 1000 / mps; return Math.floor(s / 60) + "'" + String(Math.round(s % 60)).padStart(2, "0"); }
 
+/* D+ avec hystérésis 2 m (le bruit GPS/baro gonfle la somme brute des deltas) */
+function gainHyst(ss) {
+  let g = 0, ref = null;
+  ss.forEach((p) => { if (p.alt == null) return; if (ref == null) ref = p.alt; const d = p.alt - ref; if (d >= 2) { g += d; ref = p.alt; } else if (d <= -2) ref = p.alt; });
+  return g;
+}
 /* Parcours des échantillons « en mouvement » avec dt borné (pauses ignorées). */
 function samples(streams, minSpeed) {
   const T = S(streams, "time"); if (!T || T.length < 10) return [];
@@ -154,7 +160,7 @@ function runMetrics(streams) {
   const hr = wmean(ss.filter((p) => p.hr).map((p) => [p.hr, p.dt]));
   const cad = wmean(ss.filter((p) => p.cad).map((p) => [p.cad * 2, p.dt]));
   const flatCad = wmean(ss.filter((p) => p.cad && Math.abs(p.g) < 3).map((p) => [p.cad * 2, p.dt]));
-  const dPlus = ss.reduce((a, p) => a + Math.max(0, p.dAlt), 0);
+  const dPlus = gainHyst(ss);
 
   const cv = variability(ss, gapV);
   const steady = cv != null && cv < 0.12;
@@ -221,7 +227,7 @@ function rideMetrics(streams, target) {
   const hv = tMove >= 25 * 60 ? halves(ss, (p) => p.v, 300) : null;
   const drift = hv && hv.a.hr && hv.b.hr ? ((hv.b.hr - hv.a.hr) / hv.a.hr) * 100 : null;
   const dec = hv && hv.a.ef && hv.b.ef ? ((hv.a.ef - hv.b.ef) / hv.a.ef) * 100 : null;
-  const dPlus = ss.reduce((a, p) => a + Math.max(0, p.dAlt), 0);
+  const dPlus = gainHyst(ss);
 
   const series = []; let acc = null;
   ss.forEach((p) => {

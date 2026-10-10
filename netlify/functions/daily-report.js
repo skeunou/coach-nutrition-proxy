@@ -102,9 +102,13 @@ const dayOf = (a) => String(a.start_date_local || a.start_date || "").slice(0, 1
 function analyse(a, st, extraText) {
   const cls = M.classify(a);
   if (!st) return { cls, m: null };
-  if (cls.fam === "ride") return { cls, m: M.rideMetrics(st, M.cadenceTarget(a.description, extraText)) };
-  if (cls.fam === "run" || cls.fam === "hike") return { cls, m: M.runMetrics(st) };
-  return { cls, m: null };
+  let m = null;
+  if (cls.fam === "ride") m = M.rideMetrics(st, M.cadenceTarget(a.description, extraText));
+  else if (cls.fam === "run" || cls.fam === "hike") m = M.runMetrics(st);
+  // Distance et D+ affichés = chiffres officiels Strava (cohérents avec l'appli)
+  if (m && a.distance) m.km = Math.round(a.distance / 10) / 100;
+  if (m && a.total_elevation_gain != null && m.kind === "run") m.dPlus = Math.round(a.total_elevation_gain);
+  return { cls, m };
 }
 const median = (arr) => { const v = arr.filter((x) => x != null && isFinite(x)).sort((p, q) => p - q); if (!v.length) return null; const k = Math.floor(v.length / 2); return v.length % 2 ? v[k] : (v[k - 1] + v[k]) / 2; };
 
@@ -323,7 +327,9 @@ exports.handler = async (event) => {
   const histBy = {};
   const want = [];
   fams.forEach((f) => {
-    const sel = prior.filter((a) => { const c = M.classify(a).fam; return f === "hike" ? (c === "hike" || c === "run") : c === f; }).slice(-HIST_N);
+    // Aperçu HTTP (10 s max) : historique réduit à 4 pour laisser le temps au coach IA
+    const n = event && event.lvDeadline ? 4 : HIST_N;
+    const sel = prior.filter((a) => { const c = M.classify(a).fam; return f === "hike" ? (c === "hike" || c === "run") : c === f; }).slice(-n);
     histBy[f] = sel; sel.forEach((a) => { if (!want.includes(a)) want.push(a); });
   });
   const computed = new Map();
