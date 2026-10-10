@@ -12,6 +12,7 @@ const strip = (s) => String(s || "").replace(/<[^>]+>/g, "").replace(/\s+/g, " "
 
 /* ---------- Intention ---------- */
 const INTENTS = [
+  ["sfr", /\bsfr\b|basse cadence|gros braquet|force (a )?(velo|basse)/],
   ["race", /\b(course|compet\w*|dossard)\b|🏁/],
   ["test", /\btest\b/],
   ["long", /sortie longue|\bsl\b|\blongue\b/],
@@ -22,7 +23,7 @@ const INTENTS = [
   ["strength", /renfo|trepied|gainage|muscu/],
   ["rest", /\brepos\b/],
 ];
-const INTENT_LBL = { race: "course / compétition", test: "test", long: "sortie longue", intervals: "fractionné / côtes", threshold: "seuil", recovery: "récupération", easy: "footing facile", strength: "renforcement", rest: "repos" };
+const INTENT_LBL = { sfr: "SFR (force à basse cadence)", race: "course / compétition", test: "test", long: "sortie longue", intervals: "fractionné / côtes", threshold: "seuil", recovery: "récupération", easy: "footing facile", strength: "renforcement", rest: "repos" };
 function intentOf(text) { const t = norm(text); for (const [k, re] of INTENTS) if (re.test(t)) return k; return null; }
 
 /* ---------- Note Strava : « intention, RPE x, pubis … » (tout est optionnel) ---------- */
@@ -58,7 +59,16 @@ function diagnose(x, hist, intent, note) {
     else if (pl > 0) add(85, `Pubis à ${pl}/10${note.pubis.where ? " (" + note.pubis.where + ")" : ""} : gêne légère, tolérable si elle ne monte pas le lendemain matin.`, "vigilance");
     else add(30, "Pubis RAS pendant la séance.", "positif");
   }
-  if (!m) return C;
+  if (!m) {
+    const pi = x.planIntent;
+    if (pi === "strength" && /weight|workout|crossfit|training|renfo|muscu/i.test((x.a.sport_type || "") + " " + (x.a.name || ""))) add(40, "Séance de renforcement conforme au plan du jour.", "positif");
+    else if (pi === "rest") add(70, `Le plan prévoyait du repos : ${Math.round((x.a.moving_time || 0) / 60)} min d'activité à la place.`, "vigilance");
+    else if (pi && intent && pi !== intent) add(50, `Plan du jour (${INTENT_LBL[pi] || pi}) différent de ce que tu as fait (${INTENT_LBL[intent] || intent}).`, "neutre");
+    if (note && note.rpe != null) add(note.rpe >= 8 ? 60 : 30, `Ressenti ${note.rpe}/10${note.rpe >= 8 ? " : séance coûteuse, à prendre en compte pour demain" : ""}.`, note.rpe >= 8 ? "vigilance" : "neutre");
+    if (x.a.average_heartrate) add(20, `FC moyenne ${Math.round(x.a.average_heartrate)} bpm sur ${Math.round((x.a.moving_time || 0) / 60)} min.`, "neutre");
+    if (!C.length) add(10, "Pas de données exploitables au-delà de la durée : la note (intention, RPE) est ce qui permet de juger ce type de séance.", "neutre");
+    return C.sort((a, b) => b.p - a.p);
+  }
   const H = hist.map((h) => h.m).filter(Boolean);
   const z = m.zones || null;
   const z12 = z ? z[0] + z[1] : null, z3p = z ? z[2] + z[3] + z[4] : null, z45 = z ? z[3] + z[4] : null;
@@ -104,6 +114,7 @@ function diagnose(x, hist, intent, note) {
       if (Math.abs(d) >= 10) add(45, `Descentes raides à ${m.descentKmh} km/h vs ${dMed.toFixed(1)} habituellement (${d > 0 ? "+" : ""}${d} %).`, d > 0 ? "positif" : "neutre");
     }
   } else {
+    if (intent === "sfr" && m.target) add(35, `Séance SFR : une cadence basse est ici l'objectif (cible ${m.target[0]}-${m.target[1]} tr/min), pas une faute.`, "neutre");
     if (m.target) {
       if (m.inTarget < 70) add(70, `Seulement ${m.inTarget} % du temps dans ta cible ${m.target[0]}-${m.target[1]} tr/min : la consigne de cadence n'est pas tenue.`, "vigilance");
       else if (m.inTarget >= 85) add(40, `${m.inTarget} % du temps dans ta cible ${m.target[0]}-${m.target[1]} tr/min : consigne tenue.`, "positif");
@@ -134,7 +145,7 @@ const SYS = [
 
 function userPrompt(ctx) {
   const L = [];
-  L.push(`Date : ${ctx.dateLbl}.`);
+  L.push(`Date : ${ctx.dateLbl}`);
   L.push(ctx.plan ? `PLAN DU JOUR : ${strip(ctx.plan.label)}${ctx.plan.sub ? " — " + strip(ctx.plan.sub) : ""}${ctx.plan.block ? " (bloc : " + ctx.plan.block + ")" : ""}.` : "PLAN DU JOUR : indisponible.");
   L.push(ctx.tomorrow ? `PLAN DE DEMAIN : ${strip(ctx.tomorrow.label)}${ctx.tomorrow.sub ? " — " + strip(ctx.tomorrow.sub) : ""}.` + (ctx.tomorrow.detail && ctx.tomorrow.detail.length ? " Détail : " + ctx.tomorrow.detail.slice(0, 4).map(strip).join(" | ") : "") : "PLAN DE DEMAIN : indisponible.");
   L.push("3 DERNIERS JOURS : " + (ctx.last3.length ? ctx.last3.join(" ; ") : "aucune activité enregistrée."));

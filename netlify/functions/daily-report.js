@@ -3,6 +3,7 @@ const M = require("./_lib/metrics.js");
 const G = require("./_lib/charts.js");
 const P = require("./_lib/plan.js");
 const K = require("./_lib/coach.js");
+const SC = require("./_lib/score.js");
 
 /* ============================================================
    RAPPORT QUOTIDIEN — LV Coach (remplace le bilan du dimanche
@@ -100,11 +101,11 @@ async function streams(token, id) {
 const dayOf = (a) => String(a.start_date_local || a.start_date || "").slice(0, 10);
 
 /* ---------- Analyse d'une activité ---------- */
-function analyse(a, st, extraText) {
+function analyse(a, st, target) {
   const cls = M.classify(a);
   if (!st) return { cls, m: null };
   let m = null;
-  if (cls.fam === "ride") m = M.rideMetrics(st, M.cadenceTarget(a.description, extraText));
+  if (cls.fam === "ride") m = M.rideMetrics(st, target === undefined ? M.cadenceTarget(a.description) : target);
   else if (cls.fam === "run" || cls.fam === "hike") m = M.runMetrics(st);
   // Distance et D+ affichés = chiffres officiels Strava (cohérents avec l'appli)
   if (m && a.distance) m.km = Math.round(a.distance / 10) / 100;
@@ -120,7 +121,7 @@ function factsFor(x, hist) {
   const head = `« ${a.name} » — ${cls.fam === "ride" ? (cls.sub === "ht" ? "vélo home-trainer" : "vélo route") : SUBLBL[cls.sub] || cls.sub}`;
   L.push("### " + head);
   if (note) L.push(`Note écrite par Laurent sur Strava : "${note}"`);
-  if (!m) { L.push(`Durée ${Math.round((a.moving_time || 0) / 60)} min. Pas de données détaillées exploitables.`); return L.join("\n"); }
+  if (!m) { L.push(`Type Strava : ${a.sport_type || a.type || "?"}. Durée ${Math.round((a.moving_time || 0) / 60)} min${a.average_heartrate ? ", FC moyenne " + Math.round(a.average_heartrate) + " bpm" + (a.max_heartrate ? " (max " + Math.round(a.max_heartrate) + ")" : "") : ", pas de FC"}. Pas de métriques d'allure/cadence pertinentes pour ce type : juge la séance sur l'intention, le ressenti et la cohérence avec le plan.`); return L.join("\n"); }
   const H = hist.map((h) => h.m).filter(Boolean);
   const med = (k) => median(H.map((h) => k(h)));
   const cmp = (label, v, mv, unit, dec) => v == null ? null : `${label} : ${v}${unit}` + (mv != null ? ` (médiane des ${H.length} dernières comparables : ${dec != null ? (+mv).toFixed(dec) : Math.round(mv)}${unit})` : "");
@@ -184,21 +185,23 @@ function chartsFor(x, hist, imgs) {
   const { m, cls } = x; if (!m) return [];
   const out = [];
   const add = (svg, alt) => { if (!svg) return; try { const id = "c" + (imgs.length + 1) + "-" + Date.now() % 100000; imgs.push({ id, png: G.toPNG(svg), alt }); out.push(id); } catch (e) { x.chartErr = e.message; } };
-  const series = (get, filt) => hist.filter((h) => h.m && (!filt || filt(h))).slice(-(HIST_N - 1)).map((h) => ({ label: short(h.day), v: get(h.m), tag: h.cls.sub === "trail" ? "trail" : (h.cls.sub === "rando" ? "rando" : "") }))
-    .concat([{ label: short(x.day), v: get(m), today: true }]);
+  // score(v, isToday) → 0..1 pour le code couleur (null = neutre)
+  const series = (get, filt, score) => hist.filter((h) => h.m && (!filt || filt(h))).slice(-(HIST_N - 1)).map((h) => { const v = get(h.m); return { label: short(h.day), v, score: score ? score(v, false) : null, tag: h.cls.sub === "trail" ? "trail" : (h.cls.sub === "rando" ? "rando" : "") }; })
+    .concat([{ label: short(x.day), v: get(m), score: score ? score(get(m), true) : null, today: true }]);
+  const efRef = median(hist.map((h) => h.m && h.m.ef));
   if (m.kind === "run") {
     add(G.sessionRun(m), "Ta séance : FC et allure VAP");
     if (cls.fam === "run") {
-      add(G.bars("Efficacité aérobie", "VAP ÷ FC · plus haut = mieux", series((q) => q.ef), { fmt: (v) => v.toFixed(2) }), "Efficacité aérobie");
-      if (m.decouplingValid) add(G.bars("Découplage cardiaque", "séances continues · plus bas = mieux", series((q) => q.decouplingValid ? q.decoupling : null, (h) => h.m.decouplingValid), { zero: true, fmt: (v) => v.toFixed(1) + "%", refs: [{ v: 5, label: "seuil 5 %" }] }), "Découplage cardiaque");
-      add(G.bars("Cadence", "pas/min · repère 170", series((q) => q.cadence), { fmt: (v) => Math.round(v), refs: [{ v: 170, label: "170", color: "#4ade80" }] }), "Cadence");
+      add(G.bars("Efficacité aérobie", "VAP ÷ FC · plus haut = mieux", series((q) => q.ef, null, (v) => SC.S.ef(v, efRef)), { fmt: (v) => v.toFixed(2) }), "Efficacité aérobie");
+      if (m.decouplingValid) add(G.bars("Découplage cardiaque", "séances continues · plus bas = mieux", series((q) => q.decouplingValid ? q.decoupling : null, (h) => h.m.decouplingValid, SC.S.decoupling), { zero: true, fmt: (v) => v.toFixed(1) + "%", refs: [{ v: 5, label: "seuil 5 %" }] }), "Découplage cardiaque");
+      add(G.bars("Cadence", "pas/min · repère 170", series((q) => q.cadence, null, SC.S.runCadence), { fmt: (v) => Math.round(v), refs: [{ v: 170, label: "170", color: "#4ade80" }] }), "Cadence");
     }
-    if (m.climb && m.climb.gain >= 50) add(G.bars("VAM en montée", "m/h · pentes ≥ 4 %", series((q) => q.climb && q.climb.gain >= 50 ? q.climb.vam : null, (h) => h.m.climb && h.m.climb.gain >= 50), { fmt: (v) => Math.round(v), refs: [{ v: VAM_TARGET, label: "cible " + VAM_TARGET }] }), "VAM en montée");
+    if (m.climb && m.climb.gain >= 50) add(G.bars("VAM en montée", "m/h · pentes ≥ 4 %", series((q) => q.climb && q.climb.gain >= 50 ? q.climb.vam : null, (h) => h.m.climb && h.m.climb.gain >= 50, (v) => SC.S.vam(v, VAM_TARGET)), { fmt: (v) => Math.round(v), refs: [{ v: VAM_TARGET, label: "cible " + VAM_TARGET }] }), "VAM en montée");
   } else {
     add(G.sessionRide(m), "Ta séance : cadence et FC");
     add(G.cadenceHist(m), "Répartition de la cadence");
-    add(G.bars("Cadence moyenne", "tr/min · dernières séances vélo", series((q) => q.cadence), { fmt: (v) => Math.round(v), refs: m.target ? [{ v: m.target[0], label: "cible " + m.target[0] + "-" + m.target[1], color: "#4ade80" }] : [] }), "Cadence moyenne");
-    add(G.bars("Dérive cardiaque", "FC 2e moitié vs 1re · plus bas = mieux", series((q) => q.hrDrift), { zero: true, fmt: (v) => v.toFixed(1) + "%" }), "Dérive cardiaque");
+    add(G.bars("Cadence moyenne", "tr/min · dernières séances vélo", series((q) => q.cadence, null, (v, today) => today && m.target ? SC.S.inTarget(m.inTarget) : null), { fmt: (v) => Math.round(v), refs: m.target ? [{ v: m.target[0], label: "cible " + m.target[0] + "-" + m.target[1], color: "#4ade80" }] : [] }), "Cadence moyenne");
+    add(G.bars("Dérive cardiaque", "FC 2e moitié vs 1re · plus bas = mieux", series((q) => q.hrDrift, null, SC.S.drift), { zero: true, fmt: (v) => v.toFixed(1) + "%" }), "Dérive cardiaque");
   }
   return out;
 }
@@ -215,13 +218,14 @@ function zoneBar(z) {
 }
 function kpis(x) {
   const { m, a } = x;
-  if (!m) return [["Durée", Math.round((a.moving_time || 0) / 60) + " min"]];
-  if (m.kind === "run") return [["Distance", m.km + " km"], ["D+", m.dPlus + " m"], ["Allure VAP", m.gapPace], ["FC moy", (m.hr || "—") + ""], ["Cadence", (m.cadence || "—") + ""], m.climb && m.climb.gain >= 50 ? ["VAM", m.climb.vam + ""] : ["Découpl.", m.decouplingValid ? m.decoupling + "%" : "—"]];
-  return [["Durée", m.movingMin + " min"], ["Cadence", m.cadence + ""], [m.target ? "Dans cible" : "Écart-type", m.target ? m.inTarget + "%" : "±" + m.cadenceSd], ["FC moy", (m.hr || "—") + ""], ["Dérive FC", m.hrDrift != null ? m.hrDrift + "%" : "—"]];
+  if (!m) return [["Durée", Math.round((a.moving_time || 0) / 60) + " min"]].concat(a.average_heartrate ? [["FC moy", Math.round(a.average_heartrate) + ""]] : [], a.max_heartrate ? [["FC max", Math.round(a.max_heartrate) + ""]] : [], x.note && x.note.rpe != null ? [["RPE", x.note.rpe + "/10"]] : []);
+  const easy = ["easy", "recovery", "long"].includes(x.intent), z12 = m.zones ? m.zones[0] + m.zones[1] : null;
+  if (m.kind === "run") return [["Distance", m.km + " km"], ["D+", m.dPlus + " m"], ["Allure VAP", m.gapPace], ["FC moy", (m.hr || "—") + "", easy ? SC.S.easyShare(z12) : null], ["Cadence", (m.cadence || "—") + "", SC.S.runCadence(m.cadence)], m.climb && m.climb.gain >= 50 ? ["VAM", m.climb.vam + "", SC.S.vam(m.climb.vam, VAM_TARGET)] : ["Découpl.", m.decouplingValid ? m.decoupling + "%" : "—", m.decouplingValid ? SC.S.decoupling(m.decoupling) : null]];
+  return [["Durée", m.movingMin + " min"], ["Cadence", m.cadence + "", m.target ? SC.S.rideCadence(m.cadence, m.target) : null], [m.target ? "Dans cible" : "Écart-type", m.target ? m.inTarget + "%" : "±" + m.cadenceSd, m.target ? SC.S.inTarget(m.inTarget) : null], ["FC moy", (m.hr || "—") + "", easy ? SC.S.easyShare(z12) : null], ["Dérive FC", m.hrDrift != null ? m.hrDrift + "%" : "—", m.hrDrift != null && m.cadenceSd <= 6 ? SC.S.drift(m.hrDrift) : null]];
 }
 function emailHTML(ctx, imgSrc) {
   const { ymd, items, rep, plan, week } = ctx;
-  const cell = ([k, v]) => `<td style="padding:6px 10px 6px 0;vertical-align:top"><div style="font-size:10px;color:${MUT};text-transform:uppercase;letter-spacing:.6px">${esc(k)}</div><div style="font-size:17px;font-weight:800;color:${INK};white-space:nowrap">${esc(v)}</div></td>`;
+  const cell = ([k, v, sc]) => `<td style="padding:6px 10px 6px 0;vertical-align:top"><div style="font-size:10px;color:${MUT};text-transform:uppercase;letter-spacing:.6px">${esc(k)}</div><div style="font-size:17px;font-weight:800;color:${SC.ramp(sc, true) || INK};white-space:nowrap">${sc != null ? '<span style="font-size:11px;vertical-align:2px">●</span> ' : ""}${esc(v)}</div></td>`;
   const blocks = items.map((x) => {
     const k = kpis(x);
     return `<tr><td style="padding:18px 18px 4px;border-top:1px solid ${LINE}">
@@ -303,16 +307,23 @@ exports.handler = async (event) => {
     const d = await get("www.strava.com", `/api/v3/activities/${a.id}?include_all_efforts=false`, token);
     const full = Object.assign({}, a, d.json && d.json.id ? { description: d.json.description } : {});
     const st = await streams(token, a.id);
-    const r = analyse(full, st, planTxt);
-    const fam = r.cls.fam;
-    const typeLbl = fam === "ride" ? (r.cls.sub === "ht" ? "Vélo · home-trainer" : "Vélo · route") : fam === "run" ? (r.cls.sub === "trail" ? "Trail" : "Course") : fam === "hike" ? "Rando montagne" : (a.sport_type || "Activité");
     const note = K.parseNote(M.userNote(full.description));
+    const planIntent = plan ? K.intentOf(plan.label + " " + plan.sub) : null;
+    const cls0 = M.classify(full);
     // Intention : note de Laurent > titre de l'activité > plan du jour (si c'est une séance du même type)
     let intent = note.intent, intentSrc = "ta note";
     if (!intent) { intent = K.intentOf(a.name); intentSrc = "titre Strava"; }
-    if (!intent && plan) { const pi = K.intentOf(plan.label + " " + plan.sub); if (pi && !["strength", "rest"].includes(pi)) { intent = pi; intentSrc = "plan du jour"; } }
+    if (!intent && planIntent && !["strength", "rest"].includes(planIntent) && cls0.fam !== "other") { intent = planIntent; intentSrc = "plan du jour"; }
+    if (!intent && cls0.fam === "other" && /weight|workout|crossfit/i.test(a.sport_type || "")) { intent = "strength"; intentSrc = "type Strava"; }
     if (!intent) intentSrc = "aucune";
-    return { a: full, day: ymd, cls: r.cls, m: r.m, note, intent, intentSrc, typeLbl, charts: [] };
+    // Cible de cadence vélo : note > SFR (50-55) > plan du jour s'il s'agit bien d'une séance vélo
+    let target = null;
+    if (cls0.fam === "ride") target = M.cadenceTarget(note.raw) || (intent === "sfr" ? [50, 55] : null) || (/velo|v[ée]lo|home-trainer|\bht\b|tr\/min/i.test(planTxt) ? M.cadenceTarget(planTxt) : null);
+    const r = analyse(full, st, target);
+    const fam = r.cls.fam;
+    const OTHER = { WeightTraining: "Renforcement", Workout: "Renforcement / circuit", Crossfit: "CrossFit", Yoga: "Yoga / mobilité", Pilates: "Pilates", Walk: "Marche", Swim: "Natation", Elliptical: "Elliptique", StairStepper: "Stepper", Rowing: "Rameur" };
+    const typeLbl = fam === "ride" ? (r.cls.sub === "ht" ? "Vélo · home-trainer" : "Vélo · route") : fam === "run" ? (r.cls.sub === "trail" ? "Trail" : "Course") : fam === "hike" ? (/walk/i.test(a.sport_type || "") ? "Marche" : "Rando montagne") : (OTHER[a.sport_type] || a.sport_type || "Activité");
+    return { a: full, day: ymd, cls: r.cls, m: r.m, note, intent, intentSrc, planIntent, typeLbl, charts: [] };
   });
 
   // Historique comparable : 8 dernières séances de la même famille (rando ↔ trail pour la VAM)

@@ -4,6 +4,7 @@
    jointes inline (cid:). Rendu à 2× pour l'écran du téléphone.
    ============================================================ */
 const fs = require("fs");
+const SC = require("./score.js");
 const path = require("path");
 
 const C = {
@@ -180,11 +181,15 @@ function bars(title, subtitle, items, o = {}) {
     if (it.v == null || !isFinite(it.v)) { s += txt(cx, base - 4, "—", { s: 10, a: "middle" }); }
     else {
       const y = Y(it.v), top = Math.min(y, base), hh = Math.max(2, Math.abs(base - y));
-      const col = it.today ? C.acc : (it.dim ? "#2c2c33" : C.bar);
-      s += `<rect x="${(cx - bw / 2).toFixed(1)}" y="${top.toFixed(1)}" width="${bw.toFixed(1)}" height="${hh.toFixed(1)}" rx="3" fill="${col}"/>`;
-      s += txt(cx, top - 5, o.fmt ? o.fmt(it.v) : it.v, { s: it.today ? 11.5 : 10, w: it.today ? 700 : 400, c: it.today ? C.acc : C.txt, a: "middle" });
+      // Couleur : score « feu tricolore » si jugeable, sinon jaune (jour) / gris (historique)
+      const sc = SC.ramp(it.score);
+      const col = sc || (it.today ? C.acc : (it.dim ? "#2c2c33" : C.bar));
+      const op = sc && !it.today && !o.solid ? 0.5 : 1;
+      if (it.today && !o.solid) s += `<rect x="${(cx - bw / 2 - 3).toFixed(1)}" y="${(top - 3).toFixed(1)}" width="${(bw + 6).toFixed(1)}" height="${(hh + 3).toFixed(1)}" rx="5" fill="none" stroke="${C.txt}" stroke-width="1.2" opacity="0.55"/>`;
+      s += `<rect x="${(cx - bw / 2).toFixed(1)}" y="${top.toFixed(1)}" width="${bw.toFixed(1)}" height="${hh.toFixed(1)}" rx="3" fill="${col}" opacity="${op}"/>`;
+      s += txt(cx, top - (it.today ? 8 : 5), o.fmt ? o.fmt(it.v) : it.v, { s: it.today ? 11.5 : 10, w: it.today ? 700 : 400, c: it.today ? (sc || C.acc) : C.txt, a: "middle" });
     }
-    s += txt(cx, y0 + h + 16, it.label, { s: 10, a: "middle", c: it.today ? C.acc : C.mut, w: it.today ? 700 : 400 });
+    s += txt(cx, y0 + h + 16, it.label, { s: 10, a: "middle", c: it.today ? C.txt : C.mut, w: it.today ? 700 : 400 });
     if (it.tag) s += txt(cx, y0 + h + 29, it.tag, { s: 9, a: "middle" });
   });
   (o.refs || []).forEach((r) => {
@@ -201,12 +206,16 @@ function cadenceHist(m) {
   if (!m.cadenceHist) return null;
   const labels = ["<60", "60-70", "70-80", "80-90", "90-100", ">100"];
   const lohi = [[0, 60], [60, 70], [70, 80], [80, 90], [90, 100], [100, 999]];
-  const items = m.cadenceHist.map((v, i) => ({
-    label: labels[i], v,
-    today: m.target ? (lohi[i][1] > m.target[0] && lohi[i][0] < m.target[1]) : false,
-  }));
-  return bars("Répartition de ta cadence", m.target ? `% du temps pédalé · jaune = ta cible ${m.target[0]}-${m.target[1]}` : "% du temps pédalé",
-    items, { zero: true, fmt: (v) => Math.round(v) + "%" });
+  const items = m.cadenceHist.map((v, i) => {
+    let score = null;
+    if (m.target) { // écart entre la tranche et la cible : 0 = vert, ≤10 = jaune, ≤20 = orange, au-delà = rouge
+      const [lo, hi] = lohi[i], d = hi > m.target[0] && lo < m.target[1] ? 0 : Math.min(Math.abs(m.target[0] - hi), Math.abs(lo - m.target[1]));
+      score = d === 0 ? 1 : d <= 10 ? 0.7 : d <= 20 ? 0.4 : 0;
+    }
+    return { label: labels[i], v, score: v > 0 ? score : null, today: false };
+  });
+  return bars("Répartition de ta cadence", m.target ? `% du temps pédalé · vert = ta cible ${m.target[0]}-${m.target[1]}, rouge = loin` : "% du temps pédalé",
+    items, { zero: true, solid: true, fmt: (v) => Math.round(v) + "%" });
 }
 
 module.exports = { toPNG, rendererError, sessionRun, sessionRide, bars, cadenceHist, C };
