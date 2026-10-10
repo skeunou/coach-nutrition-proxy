@@ -8,9 +8,14 @@
   external_node_modules = ["@resvg/resvg-js", "@resvg/resvg-js-linux-x64-gnu"]
 
 [functions."daily-report"]
-  # Rapport du soir — 21h Paris (19h UTC en été, 20h UTC en hiver ; la fonction filtre sur l'heure de Paris)
-  schedule = "0 19,20 * * *"
+  # MAIL DU SOIR EN SOMMEIL (10 oct. 2026) — remplacé par l'onglet « Coach » du P.P.L.
+  # Code conservé ; envoi manuel toujours possible via report-send-background.
+  # schedule = "0 19,20 * * *"
   included_files = ["node_modules/@resvg/resvg-js-linux-x64-gnu/**"]
+
+[functions."report-build-cron"]
+  # Génère le rapport du jour à 21h Paris et le range dans lv-data (onglet Coach). Aucun mail.
+  schedule = "0 19,20 * * *"
 
 [functions."report-preview"]
   # Porte HTTP du rapport (une fonction planifiée répond 403 en direct)

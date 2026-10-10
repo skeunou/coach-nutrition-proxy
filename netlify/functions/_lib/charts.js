@@ -11,6 +11,7 @@ const C = {
   bg: "#141416", grid: "#2a2a30", txt: "#f0f0f0", mut: "#8a8a96",
   acc: "#e8ff47", acc2: "#ff6b35", grn: "#4ade80", red: "#f87171", bar: "#3a3a42",
 };
+let GID = Math.floor(Math.random() * 1e6);
 const W = 400; // largeur logique : texte lisible sur téléphone (image affichée à 100 %)
 
 /* ---------- Rendu PNG ---------- */
@@ -44,7 +45,7 @@ function rendererError() { loadRenderer(); return RENDER_ERR; }
 /* ---------- Helpers SVG ---------- */
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 function txt(x, y, s, o = {}) {
-  return `<text x="${x}" y="${y}" font-family="${o.f || "DM Sans"}" font-size="${o.s || 11}" font-weight="${o.w || 400}" fill="${o.c || C.mut}" text-anchor="${o.a || "start"}"${o.ls ? ` letter-spacing="${o.ls}"` : ""}>${esc(s)}</text>`;
+  return `<text x="${x}" y="${y}" font-family="${o.f || "DM Sans"}, sans-serif" font-size="${o.s || 11}" font-weight="${o.w || 400}" fill="${o.c || C.mut}" text-anchor="${o.a || "start"}"${o.ls ? ` letter-spacing="${o.ls}"` : ""}>${esc(s)}</text>`;
 }
 function frame(h, title, subtitle, body) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${h}" viewBox="0 0 ${W} ${h}">` +
@@ -201,8 +202,9 @@ function bars(title, subtitle, items, o = {}) {
   // Légende du dégradé (seulement si au moins une barre est jugée)
   if (items.some((it) => it.score != null)) {
     const lx = W - 16 - 84, ly = 20;
-    s += `<defs><linearGradient id="lvramp" x1="0" x2="1" y1="0" y2="0">${SC.DARK.map(([p, c]) => `<stop offset="${p}" stop-color="${c}"/>`).join("")}</linearGradient></defs>` +
-      `<rect x="${lx}" y="${ly}" width="84" height="6" rx="3" fill="url(#lvramp)"/>` +
+    const gid = "lvramp" + (++GID); // id unique : plusieurs SVG cohabitent dans la page du P.P.L
+    s += `<defs><linearGradient id="${gid}" x1="0" x2="1" y1="0" y2="0">${SC.DARK.map(([p, c]) => `<stop offset="${p}" stop-color="${c}"/>`).join("")}</linearGradient></defs>` +
+      `<rect x="${lx}" y="${ly}" width="84" height="6" rx="3" fill="url(#${gid})"/>` +
       txt(lx, ly + 17, "loin", { s: 9 }) + txt(lx + 84, ly + 17, "atteint", { s: 9, a: "end" });
   }
   return frame(H, title, subtitle, s);

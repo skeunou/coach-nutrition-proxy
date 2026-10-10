@@ -4,6 +4,7 @@ const G = require("./_lib/charts.js");
 const P = require("./_lib/plan.js");
 const K = require("./_lib/coach.js");
 const SC = require("./_lib/score.js");
+const ST = require("./_lib/store.js");
 
 /* ============================================================
    RAPPORT QUOTIDIEN — LV Coach (remplace le bilan du dimanche
@@ -181,10 +182,16 @@ async function coach(ctx, skipLLM, deadline) {
 }
 
 /* ---------- Graphiques ---------- */
-function chartsFor(x, hist, imgs) {
+function chartsFor(x, hist, imgs, noPng) {
   const { m, cls } = x; if (!m) return [];
   const out = [];
-  const add = (svg, alt) => { if (!svg) return; try { const id = "c" + (imgs.length + 1) + "-" + Date.now() % 100000; imgs.push({ id, png: G.toPNG(svg), alt }); out.push(id); } catch (e) { x.chartErr = e.message; } };
+  x.svgs = [];
+  const add = (svg, alt) => {
+    if (!svg) return;
+    x.svgs.push({ svg, alt }); // l'onglet Coach du P.P.L affiche le SVG directement
+    if (noPng) return;
+    try { const id = "c" + (imgs.length + 1) + "-" + Date.now() % 100000; imgs.push({ id, png: G.toPNG(svg), alt }); out.push(id); } catch (e) { x.chartErr = e.message; }
+  };
   // score(v, isToday) → 0..1 pour le code couleur (null = neutre)
   const series = (get, filt, score) => hist.filter((h) => h.m && (!filt || filt(h))).slice(-(HIST_N - 1)).map((h) => { const v = get(h.m); return { label: short(h.day), v, score: score ? score(v, false) : null, tag: h.cls.sub === "trail" ? "trail" : (h.cls.sub === "rando" ? "rando" : "") }; })
     .concat([{ label: short(x.day), v: get(m), score: score ? score(get(m), true) : null, today: true }]);
@@ -280,21 +287,27 @@ exports.handler = async (event) => {
   const T0 = Date.now();
   const q = (event && event.queryStringParameters) || {};
   const action = q.action || "", KEY = process.env.RECAP_KEY || "";
-  const isPreview = action === "preview", isRun = action === "run";
+  const isPreview = action === "preview", isRun = action === "run", isJson = action === "json";
   const J = (code, o) => ({ statusCode: code, headers: { "Content-Type": "application/json" }, body: JSON.stringify(o) });
-  if (isPreview || isRun) { if (!KEY || q.key !== KEY) return J(401, { error: "clé invalide (RECAP_KEY)" }); }
+  if (isPreview || isRun || isJson) { if (!KEY || q.key !== KEY) return J(401, { error: "clé invalide (RECAP_KEY)" }); }
   else if (action) return J(400, { error: "action inconnue" });
   const pn = parisNow();
-  if (!isPreview && !isRun && pn.hour !== HOUR) return { statusCode: 200, body: `skip (Paris ${pn.hour}h, attendu ${HOUR}h)` };
+  if (!isPreview && !isRun && !isJson && pn.hour !== HOUR) return { statusCode: 200, body: `skip (Paris ${pn.hour}h, attendu ${HOUR}h)` };
   const ymd = /^\d{4}-\d{2}-\d{2}$/.test(q.date || "") ? q.date : pn.ymd;
 
   const token = await stravaToken();
   if (!token) {
+    if (isJson) return J(200, { status: "error", error: "Connexion Strava à renouveler (STRAVA_REFRESH_LAURENT)." });
     if (!isPreview) await sendEmail("⚠️ Rapport du soir indisponible — reconnecte Strava", "<p>Connexion Strava à renouveler : mets à jour <b>STRAVA_REFRESH_LAURENT</b> dans Netlify.</p>", []);
     return J(200, { error: "strava_auth" });
   }
   const acts = await listActs(token, ymd);
   const todays = acts.filter((a) => dayOf(a) === ymd);
+  if (!todays.length && isJson) {
+    const rpt = { v: 1, ymd, status: "empty", generatedAt: new Date().toISOString(), message: "Aucune activité Strava ce jour-là." };
+    if (q.store === "1") await ST.writeReport(ymd, rpt);
+    return J(200, rpt);
+  }
   if (!todays.length) return isPreview ? { statusCode: 200, headers: { "Content-Type": "text/html; charset=utf-8" }, body: `<p>Aucune activité Strava le ${frDate(ymd)} → pas de mail ce soir-là.</p>` } : J(200, { sent: false, reason: "aucune activité", day: ymd });
 
   // Plan du jour (moteur extrait de l'app — non bloquant)
@@ -343,7 +356,7 @@ exports.handler = async (event) => {
 
   // Graphiques
   const imgs = [];
-  items.forEach((x) => { x.charts = chartsFor(x, histFor(x.cls.fam), imgs); });
+  items.forEach((x) => { x.charts = chartsFor(x, histFor(x.cls.fam), imgs, isJson); });
 
   // Charge de la semaine (lundi → jour J)
   const mon = addDays(ymd, -(isoDow(ymd) - 1));
@@ -376,6 +389,26 @@ exports.handler = async (event) => {
   const ctx = { ymd, items, rep, plan, week, imgs };
   const subject = "🏔️ " + frDate(ymd) + " — " + items.map((x) => x.m ? (x.m.kind === "run" ? `${x.typeLbl} ${x.m.km} km` : `${x.typeLbl.split(" · ")[1] === "home-trainer" ? "HT" : "Vélo"} ${x.m.movingMin}′`) : x.typeLbl).join(" · ") + (rep.titre ? " — " + rep.titre : "");
 
+  if (isJson) {
+    const rpt = {
+      v: 1, ymd, status: "ok", generatedAt: new Date().toISOString(), ms: Date.now() - T0,
+      coach: { titre: rep.titre, passe: rep.passe, sens: rep.sens, demain: rep.demain, src: rep.src, model: rep.model || null, note: rep.note || null },
+      plan: plan ? { label: strip(plan.label), sub: strip(plan.sub), block: plan.block } : null,
+      tomorrow: tomorrow ? { label: strip(tomorrow.label), sub: strip(tomorrow.sub) } : null,
+      week: { km: week.km, dp: week.dp, ride: week.ride, tg: week.tg || null },
+      histN: event && event.lvDeadline && !event.lvFull ? 4 : HIST_N,
+      activities: items.map((x) => ({
+        name: x.a.name, typeLbl: x.typeLbl, intent: x.intent ? K.INTENT_LBL[x.intent] : null, intentSrc: x.intentSrc,
+        note: x.note && x.note.raw ? x.note.raw : null,
+        kpis: kpis(x).map(([k, v, sc]) => ({ k, v, score: sc == null ? null : Math.round(sc * 100) / 100, color: SC.ramp(sc, true) })),
+        zones: x.m && x.m.zones ? x.m.zones : null,
+        charts: x.svgs || [],
+      })),
+    };
+    if (q.debug === "1") rpt.prompt = K.userPrompt(cctx);
+    if (q.store === "1") { const w = await ST.writeReport(ymd, rpt); rpt.stored = w.ok; if (!w.ok) rpt.storeError = w; }
+    return J(200, rpt);
+  }
   if (isPreview) {
     const html = emailHTML(ctx, (id) => "data:image/png;base64," + imgs.find((i) => i.id === id).png.toString("base64"));
     const dbg = q.debug === "1" ? `<pre style="white-space:pre-wrap;font-size:11px;padding:12px">${esc(K.userPrompt(cctx))}\n\nrendu: ${esc(G.rendererError() || "ok")} · ${Date.now() - T0} ms · coach: ${rep.src}${rep.model ? " " + rep.model : ""}</pre>` : "";
