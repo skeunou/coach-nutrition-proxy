@@ -198,6 +198,13 @@ function bars(title, subtitle, items, o = {}) {
       txt(x0 + 4, y - 4, r.label, { s: 10, w: 700, c: r.color || C.acc2 });
   });
   if (o.note) s += txt(18, H - 10, o.note, { s: 9.5 });
+  // Légende du dégradé (seulement si au moins une barre est jugée)
+  if (items.some((it) => it.score != null)) {
+    const lx = W - 16 - 84, ly = 20;
+    s += `<defs><linearGradient id="lvramp" x1="0" x2="1" y1="0" y2="0">${SC.DARK.map(([p, c]) => `<stop offset="${p}" stop-color="${c}"/>`).join("")}</linearGradient></defs>` +
+      `<rect x="${lx}" y="${ly}" width="84" height="6" rx="3" fill="url(#lvramp)"/>` +
+      txt(lx, ly + 17, "loin", { s: 9 }) + txt(lx + 84, ly + 17, "atteint", { s: 9, a: "end" });
+  }
   return frame(H, title, subtitle, s);
 }
 

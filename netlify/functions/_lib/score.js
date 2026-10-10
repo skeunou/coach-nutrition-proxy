@@ -10,10 +10,17 @@ const lin = (v, bad, good) => clamp((v - bad) / (good - bad)); // marche dans le
 // Rampe sur fond sombre (graphiques) et sur fond blanc (chiffres du mail)
 const DARK = [[0, "#f05252"], [0.4, "#ff8a3d"], [0.7, "#f5d547"], [1, "#4ade80"]];
 const LIGHT = [[0, "#d92d35"], [0.4, "#d8590e"], [0.7, "#a87d00"], [1, "#16884a"]];
+// Interpolation continue entre les paliers (teinte proportionnelle à l'écart normalisé)
+function hex(c) { return [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16)); }
 function ramp(s, light) {
   if (s == null || !isFinite(s)) return null;
+  s = clamp(s);
   const R = light ? LIGHT : DARK;
-  for (let i = 1; i < R.length; i++) if (s <= R[i][0]) return s - R[i - 1][0] < R[i][0] - s ? R[i - 1][1] : R[i][1];
+  for (let i = 1; i < R.length; i++) if (s <= R[i][0]) {
+    const [a, ca] = R[i - 1], [b, cb] = R[i], t = (s - a) / (b - a || 1);
+    const A = hex(ca), B = hex(cb);
+    return "#" + A.map((v, k) => Math.round(v + (B[k] - v) * t).toString(16).padStart(2, "0")).join("");
+  }
   return R[R.length - 1][1];
 }
 
@@ -32,4 +39,4 @@ const S = {
   easyShare: (z12) => z12 == null ? null : lin(z12, 60, 90),
 };
 
-module.exports = { ramp, S, clamp };
+module.exports = { ramp, S, clamp, DARK, LIGHT };
