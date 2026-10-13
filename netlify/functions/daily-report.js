@@ -178,10 +178,11 @@ async function coach(ctx, skipLLM, deadline) {
     for (let attempt = 0; attempt < 2; attempt++) { // 2e essai = correction ciblée de la 1re réponse
       const budget = deadline - Date.now() - 600;
       if (budget < need) { tried.push({ model: lbl, why: "temps insuffisant" }); break; }
-      const r = await post("api.anthropic.com", "/v1/messages", { model, max_tokens: 900, system: K.SYS, messages: msgs }, H, Math.min(22000, budget));
+      const r = await post("api.anthropic.com", "/v1/messages", { model, max_tokens: 2000, system: K.SYS, messages: msgs }, H, Math.min(22000, budget));
       if (r.status !== 200) { tried.push({ model: lbl, why: "HTTP " + r.status + (r.json && r.json.error ? " " + (r.json.error.type || r.json.error.message || "") : "") }); break; }
       const { raw, j } = parseJSON(r);
-      const why = K.checkReply(j, source);
+      let why = K.checkReply(j, source);
+      if (why === "réponse non JSON" && r.json && r.json.stop_reason === "max_tokens") why = "réponse coupée (trop longue) : sois plus concis";
       if (!why) { tried.push({ model: lbl, ok: true, attempt: attempt + 1 }); return { titre: String(j.titre), passe: String(j.passe), sens: String(j.sens), demain: String(j.demain), src: "ia", model: lbl, tried }; }
       tried.push({ model: lbl, why });
       msgs = msgs.concat([{ role: "assistant", content: raw || "(vide)" }, { role: "user", content: `Ta réponse est rejetée : ${why}. Réécris le JSON complet en corrigeant uniquement ce problème, sans ajouter aucun chiffre absent des données.` }]);
@@ -335,7 +336,7 @@ exports.handler = async (event) => {
   if (oldRefs) storage["coach:refs:v1"] = JSON.stringify(oldRefs);
   try { const app = await get(APP.host, APP.path); if (app.status === 200) { engine = P.buildEngine(app.raw, storage); plan = P.plannedFor(engine, ymd); } } catch (e) { plan = null; }
   let cal = null; try { if (engine) cal = P.calendar(engine, ymd); } catch (e) { cal = null; }
-  let profil = null; try { const pr = (await ST.readJson("coach/profil.json")).data; profil = pr && pr.text ? String(pr.text) : null; } catch (e) {}
+  let profil = null, profDates = []; try { const pr = (await ST.readJson("coach/profil.json")).data; profil = pr && pr.text ? String(pr.text) : null; profDates = (pr && pr.dates) || []; } catch (e) {}
   const planTxt = plan ? [plan.label, plan.sub].concat(plan.specs || [], plan.detail || []).map(strip).join(" · ") : "";
 
   // Détail (description) des activités du jour + streams
@@ -429,7 +430,8 @@ exports.handler = async (event) => {
   const recur = K.recurrences(mem, ymd, todayKeys);
   mem.byDay[ymd] = todayKeys;
   const cutoff = addDays(ymd, -120); Object.keys(mem.byDay).forEach((d) => { if (d < cutoff) delete mem.byDay[d]; });
-  const cctx = { dateLbl: frLong(ymd), plan, tomorrow, last3, week, items, special, recur, profil, calendar: cal && cal.text };
+  const evs = (cal && cal.events || []).concat(profDates || []);
+  const cctx = { dateLbl: frLong(ymd), plan, tomorrow, last3, week, items, special, recur, profil, calendar: cal && cal.text, anchors: K.anchorsText(ymd, evs) };
   const facts = [
     `Date : ${frLong(ymd)}`,
     plan ? `Séance prévue au plan aujourd'hui : ${strip(plan.label)}${plan.sub ? " — " + strip(plan.sub) : ""}${plan.block ? " (bloc : " + plan.block + ")" : ""}.` + (plan.detail && plan.detail.length ? " Détail : " + plan.detail.map(strip).join(" | ") : "") : "Plan du jour : indisponible.",
@@ -466,7 +468,7 @@ exports.handler = async (event) => {
     if (q.store === "1") {
       const w = await ST.writeReport(ymd, rpt); rpt.stored = w.ok; if (!w.ok) rpt.storeError = w;
       if (pRef) await ST.writeJson("coach/refs.json", refs, "coach refs " + ymd);
-      if (cal && cal.text) await ST.writeJson("coach/calendrier.json", { ymd, j0: cal.j0, text: cal.text }, "coach calendrier " + ymd);
+      if (cal && cal.text) await ST.writeJson("coach/calendrier.json", { ymd, j0: cal.j0, text: cal.text, events: cal.events }, "coach calendrier " + ymd);
       mem.titles = mem.titles || {}; mem.titles[ymd] = rep.titre + (rep.demain ? " — demain : " + rep.demain : "");
       Object.keys(mem.titles).forEach((d) => { if (d < cutoff) delete mem.titles[d]; });
       mem.updated = new Date().toISOString(); await ST.writeJson("coach/memoire.json", mem, "coach mémoire " + ymd);

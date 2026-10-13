@@ -112,7 +112,13 @@ function calendar(engine, ymd) {
   if (races.length) L.push("COURSES À VENIR :\n" + races.map((r) => `- ${fr(r.d)} : ${r.n} (${r.km} km, ${r.dp} m D+) — ${strip(r.role)}`).join("\n"));
   const miles = Object.keys(c.miles || {}).filter((d) => d >= ymd).sort();
   if (miles.length) L.push("JALONS :\n" + miles.map((d) => `- ${fr(d)} : ${strip(c.miles[d]).replace(/^📍\s*JALON\s*—\s*/, "")}`).join("\n"));
-  return { j0: c.j0 || null, text: L.join("\n\n") };
+  // Événements datés structurés (pour les repères « dans N jours / il y a N jours » calculés par le code)
+  const ev = [];
+  if (c.j0) ev.push({ d: c.j0, l: "Reprise de la course à pied (J0)" });
+  (c.blocks || []).forEach((b) => { if (/p[ée]rou/i.test(b.name)) { ev.push({ d: b.start, l: "Départ au Pérou" }); } });
+  (c.races || []).forEach((r) => ev.push({ d: r.d, l: "Course : " + r.n }));
+  Object.keys(c.miles || {}).forEach((d) => ev.push({ d, l: strip(c.miles[d]).replace(/^📍\s*JALON\s*—\s*/, "").split(/[.:]/)[0].trim() }));
+  return { j0: c.j0 || null, text: L.join("\n\n"), events: ev };
 }
 
 module.exports = { buildEngine, plannedFor, calendar };

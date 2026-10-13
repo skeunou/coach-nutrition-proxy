@@ -156,10 +156,16 @@ function diagnose(x, hist, intent, note) {
       }
       else add(40, `${m.inPower} % du temps dans ta cible ${m.pTarget[0]}-${m.pTarget[1]} W : consigne de puissance tenue.`, "positif");
     }
-    const wpbMed = median(H.map((h) => h.wPerBeat));
+    const wpbMed = median(H.map((h) => h.wPerBeat)), hrMedR = median(H.map((h) => h.hr)), pwMed = median(H.map((h) => h.watts));
     if (m.wPerBeat && wpbMed && H.filter((h) => h.wPerBeat).length >= 3) {
       const d = Math.round((m.wPerBeat / wpbMed - 1) * 100);
-      if (Math.abs(d) >= 5) add(50, `${m.wPerBeat} W par battement vs ${wpbMed.toFixed(2)} habituellement (${d > 0 ? "+" : ""}${d} %) : ${d > 0 ? "plus de puissance pour le même cœur, la forme aérobie progresse" : "le cœur travaille plus pour la même puissance (fatigue, chaleur, sommeil ?)"}.`, d > 0 ? "positif" : "vigilance");
+      if (m.hr && m.hr < 100) {
+        // FC proche du repos : la relation puissance/FC n'est pas exploitable → pas d'alerte « efficacité »
+        if (pwMed && m.watts && Math.abs(m.watts / pwMed - 1) >= 0.15) add(25, `Puissance ${m.watts} W contre ${Math.round(pwMed)} W habituellement, à FC très basse (${m.hr} bpm) : séance roulée ${m.watts < pwMed ? "plus légère" : "plus appuyée"} que d'habitude. Sous 100 bpm, le rapport puissance/FC n'est pas interprétable : n'en tire aucune conclusion de forme ou de fatigue.`, "neutre");
+      } else if (Math.abs(d) >= 5) {
+        const sameHr = hrMedR && Math.abs(m.hr - hrMedR) <= 5;
+        add(50, `${m.wPerBeat} W par battement vs ${wpbMed.toFixed(2)} habituellement (${d > 0 ? "+" : ""}${d} %)` + (sameHr ? ` à FC comparable (${m.hr} vs ${Math.round(hrMedR)} bpm)` : "") + ` : ${d > 0 ? "plus de puissance pour le même cœur, la forme aérobie progresse" : "moins de puissance pour le même cœur. Causes possibles à vérifier dans les données : course ou séance intense dans les 3 derniers jours, ZP, RPE. Sans elles, cause non identifiable"}.`, d > 0 ? "positif" : "vigilance");
+      }
     }
     if (m.cadenceSd > 8) add(50, `Cadence très dispersée (±${m.cadenceSd} tr/min) : pédalage irrégulier, travaille la régularité avant l'intensité.`, "vigilance");
     if (z && (easyLike || intent === null) && z3p >= 20) add(65, `${z3p} % du temps au-dessus de 143 bpm sur du vélo : ce n'était plus de la récupération active.`, "vigilance");
@@ -169,9 +175,26 @@ function diagnose(x, hist, intent, note) {
   return C.sort((a, b) => b.p - a.p);
 }
 
+/* ---------- Repères datés calculés (l'IA ne calcule jamais une date elle-même) ---------- */
+const JOURS = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."];
+function anchorsText(ymd, events) {
+  const U = (d) => { const p = d.split("-").map(Number); return Date.UTC(p[0], p[1] - 1, p[2]); };
+  const t0 = U(ymd), seen = new Set();
+  const all = (events || []).filter((e) => e && /^\d{4}-\d{2}-\d{2}$/.test(e.d) && e.l)
+    .map((e) => Object.assign({}, e, { n: Math.round((U(e.d) - t0) / 864e5) }))
+    .filter((e) => { const k = e.d + e.l; if (seen.has(k)) return false; seen.add(k); return e.n >= -21; })
+    .sort((a, b) => a.n - b.n);
+  const line = (e) => {
+    const p = e.d.split("-").map(Number), dow = JOURS[new Date(U(e.d)).getUTCDay()];
+    const rel = e.n === 0 ? "AUJOURD'HUI" : e.n === 1 ? "DEMAIN (pas encore passé)" : e.n === -1 ? "hier (déjà passé)" : e.n > 0 ? `dans ${e.n} jours (PAS ENCORE PASSÉ)` : `il y a ${-e.n} jours (déjà passé)`;
+    return `- ${dow} ${p[2]}/${p[1]}/${String(p[0]).slice(2)} : ${e.l} → ${rel}`;
+  };
+  return all.filter((e) => e.n < 0).slice(-4).concat(all.filter((e) => e.n >= 0).slice(0, 8)).map(line).join("\n");
+}
+
 /* ---------- Prompt ---------- */
 const SYS = [
-  "Tu es le coach trail de Laurent : infirmier libéral, athlète « diesel » d'ultra-endurance, VO2max 56. Objectif : UT4M 180 Challenge (juillet 2027, 4 étapes de ~44 km, 11 700 m D+). Limiteurs : économie de grimpe (VAM) et durabilité en descente. Pubalgie réveillée fin septembre : reprise progressive, le pubis passe avant la performance. Course à pied : uniquement ce que le CALENDRIER et le plan autorisent (voir J0 de reprise) ; ne propose jamais de course avant le J0.",
+  "Tu es le coach trail de Laurent : infirmier libéral, athlète « diesel » d'ultra-endurance, VO2max 56. Objectif : UT4M 180 Challenge (juillet 2027, 4 étapes de ~44 km, 11 700 m D+). Limiteurs : économie de grimpe (VAM) et durabilité en descente. Pubalgie réveillée fin septembre (infiltration : voir REPÈRES DATÉS) : reprise progressive, le pubis passe avant la performance. Course à pied : uniquement ce que le CALENDRIER et le plan autorisent (voir J0 de reprise) ; ne propose jamais de course avant le J0.",
   "FICHE ATHLÈTE et CALENDRIER (fournis dans les données) : ce sont des faits validés par Laurent. Respecte ses contraintes (santé, travail, matériel, créneaux) et situe chaque conseil dans le bloc en cours et la prochaine échéance quand c'est pertinent.",
   "",
   "TON TRAVAIL : transformer un diagnostic chiffré en décisions. Un bon compte-rendu fait gagner quelque chose à Laurent : comprendre une erreur, confirmer un bon choix, savoir exactement quoi faire demain. Il n'a jamais eu de coach : explique le « pourquoi » (physiologie, risque de blessure, performance) en une phrase simple.",
@@ -195,6 +218,9 @@ const SYS = [
   "  · Plan de demain = repos : la consigne porte sur la récupération ou sur ce qu'il doit noter.",
   "",
   "INTERDITS :",
+  "- Situer un événement dans le temps (passé/futur, « dimanche dernier »…) autrement que par les REPÈRES DATÉS fournis.",
+  "- Deviner une cause absente des données (sommeil, lever à 4h, hydratation, stress…). Une cause n'est citée que si elle figure dans les données (course ou séance intense récente dans les 3 derniers jours, ZP, RPE, note). Sinon : « cause non identifiable avec les données du jour ».",
+  "- Écrire une valeur de ZP, RPE ou sensation différente de celle notée (si ZP pré 3/10 noté, ne dis jamais 0).",
   "- Tout chiffre, fait, séance, douleur ou sensation absent des données. Toute déduction présentée comme un fait.",
   "- Formules creuses : « ton organisme encaisse bien », « tu as posé les bases », « c'est bon signe », « continue comme ça », « bravo », « belle séance », « à l'écoute de ton corps », « bonne gestion » sans dire laquelle.",
   "- Réciter les chiffres affichés sans les interpréter.",
@@ -209,6 +235,7 @@ function userPrompt(ctx) {
   const L = [];
   L.push(`Date : ${ctx.dateLbl}`);
   if (ctx.profil) L.push("FICHE ATHLÈTE (validée par Laurent) :\n" + ctx.profil);
+  if (ctx.anchors) L.push("REPÈRES DATÉS (calculés par le code, font foi — ne recalcule jamais une date toi-même) :\n" + ctx.anchors);
   if (ctx.calendar) L.push("CALENDRIER (issu de son plan) :\n" + ctx.calendar);
   L.push(ctx.plan ? `PLAN DU JOUR : ${strip(ctx.plan.label)}${ctx.plan.sub ? " — " + strip(ctx.plan.sub) : ""}${ctx.plan.block ? " (bloc : " + ctx.plan.block + ")" : ""}.` : "PLAN DU JOUR : indisponible.");
   L.push(ctx.tomorrow ? `PLAN DE DEMAIN : ${strip(ctx.tomorrow.label)}${ctx.tomorrow.sub ? " — " + strip(ctx.tomorrow.sub) : ""}.` + (ctx.tomorrow.detail && ctx.tomorrow.detail.length ? " Détail : " + ctx.tomorrow.detail.slice(0, 4).map(strip).join(" | ") : "") : "PLAN DE DEMAIN : indisponible.");
@@ -261,7 +288,7 @@ const RECUR = [
   ["puissance", "Consigne de puissance non tenue", (t) => /cible de puissance/.test(t) && /^Seulement/.test(t)],
   ["cad_irreg", "Pédalage irrégulier", (t) => /Cadence très dispersée/.test(t)],
   ["rpe", "Ressenti trop élevé pour une séance facile", (t) => /^Ressenti .* censée être facile/.test(t)],
-  ["efficacite", "Efficacité aérobie en baisse", (t) => /moins de vitesse pour le même cœur|le cœur travaille plus pour la même puissance/.test(t)],
+  ["efficacite", "Efficacité aérobie en baisse", (t) => /moins de vitesse pour le même cœur|moins de puissance pour le même cœur/.test(t)],
 ];
 const RECUR_LBL = Object.fromEntries(RECUR.map(([k, l]) => [k, l]));
 function recurKeys(diag) {
@@ -296,4 +323,4 @@ function checkReply(j, sourceText) {
   return null;
 }
 
-module.exports = { parseNote, intentOf, diagnose, SYS, userPrompt, fallbackReport, checkReply, recurKeys, recurrences, RECUR_LBL, INTENT_LBL, VAM_TARGET };
+module.exports = { anchorsText, parseNote, intentOf, diagnose, SYS, userPrompt, fallbackReport, checkReply, recurKeys, recurrences, RECUR_LBL, INTENT_LBL, VAM_TARGET };
