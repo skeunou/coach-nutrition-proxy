@@ -38,6 +38,8 @@ exports.handler = async (event) => {
   const r = await get(`/api/v1/athlete/${id}/wellness?oldest=${ymd(old)}&newest=${ymd(now)}`, apiKey);
   if (r.status === 401 || r.status === 403) return J(200, { status: "intervals_denied", http: r.status });
   if (r.status !== 200 || !Array.isArray(r.json)) return J(200, { status: "intervals_error", http: r.status });
+  // Diagnostic : ?raw=1 → champs bruts renvoyés par intervals.icu (clés non nulles seulement)
+  if (q.raw === "1") return J(200, { status: "raw", days: r.json.map((w) => { const o = {}; Object.keys(w).forEach((k) => { if (w[k] != null && w[k] !== "" && !(Array.isArray(w[k]) && !w[k].length)) o[k] = w[k]; }); return o; }) });
   const out = r.json.map((w) => ({
     d: w.id,
     sleepH: typeof w.sleepSecs === "number" ? Math.round(w.sleepSecs / 360) / 10 : null,
