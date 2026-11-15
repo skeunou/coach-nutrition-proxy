@@ -143,4 +143,32 @@ async function sync(dry) {
   return { status: "ok", from: plan.from, to: plan.to, pushed, removed };
 }
 
-module.exports = { sync, buildEvents, isRun, workoutText, paceOf };
+/* Séance BIDON pour tester la chaîne P.P.L → intervals.icu → Garmin (15 nov. 2026).
+   mode "push" : crée « PTC TEST » aujourd'hui · mode "del" : la supprime.
+   Elle disparaît aussi d'elle-même : la synchro du matin retire tout « ppl-… » absent du plan. */
+async function testEvent(mode) {
+  if (!process.env.INTERVALS_API_KEY) return { status: "no_api_key" };
+  const id = ATHLETE(), k = ymdOf(parisToday()), ext = PREFIX + "test-" + k;
+  if (mode === "del") {
+    const ex = await iv("GET", `/api/v1/athlete/${id}/events?oldest=${k}&newest=${k}`);
+    const hits = (Array.isArray(ex.json) ? ex.json : []).filter((e) => e.external_id === ext);
+    for (const e of hits) await iv("DELETE", `/api/v1/athlete/${id}/events/${e.id}`);
+    return { status: "deleted", count: hits.length };
+  }
+  const fake = { label: "Fractionné I · 1/40", short: "3×(1′C/1′M)", typeKey: "fond",
+    detail: ["Intensité course : FC < 140 bpm (Z1-Z2), allure ≥ 6′04/km."], _specs: [["FC", "< 140"], ["Cadence", "≥ 170"]] };
+  const ev = { category: "WORKOUT", type: "Run", start_date_local: k + "T00:00:00", name: "PTC TEST : 3×(1′C/1′M)", description: workoutText(fake), external_id: ext };
+  const r = await iv("POST", `/api/v1/athlete/${id}/events/bulk?upsert=true`, [ev]);
+  if (r.status === 401 || r.status === 403) return { status: "intervals_denied", http: r.status };
+  if (r.status !== 200) return { status: "intervals_error", http: r.status, detail: (r.raw || "").slice(0, 300) };
+  const e = (r.json || [])[0] || {};
+  const steps = [];
+  (function walk(list, rep) { (list || []).forEach((st) => {
+    if (st.steps) return walk(st.steps, st.reps || 1);
+    const tgt = st.pace ? ("allure " + JSON.stringify(st.pace)) : st.hr ? ("FC " + JSON.stringify(st.hr)) : "aucune cible";
+    steps.push((rep > 1 ? rep + "× " : "") + (st.text || "?") + " · " + (st.duration ? Math.round(st.duration / 60) + "′" : "?") + " · " + tgt);
+  }); })(e.workout_doc && e.workout_doc.steps, 1);
+  return { status: "ok", date: k, name: e.name, steps, sent: ev.description };
+}
+
+module.exports = { testEvent,  sync, buildEvents, isRun, workoutText, paceOf };
