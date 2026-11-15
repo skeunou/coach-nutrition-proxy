@@ -159,7 +159,11 @@ async function testEvent(mode) {
   }
   const fake = { label: "Fractionné I · 1/40", short: "3×(1′C/1′M)", typeKey: "fond",
     detail: ["Intensité course : FC < 140 bpm (Z1-Z2), allure ≥ 6′04/km."], _specs: [["FC", "< 140"], ["Cadence", "≥ 170"]] };
-  const ev = { category: "WORKOUT", type: "Run", start_date_local: k + "T00:00:00", name: "PTC TEST : 3×(1′C/1′M)", description: workoutText(fake), external_id: ext };
+  // mode "hr" : même séance, cibles FC seulement (diagnostic : séance vide sur Garmin si l'allure seuil manque ?)
+  const descr = mode === "hr"
+    ? ["Warmup", "- Marche 5m 50-65% HR", "", "Main Set 3x", "- Course 1m 60-78% HR", "- Marche 1m 50-65% HR intensity=rest", "", "Cooldown", "- Marche 5m 50-65% HR"].join("\n")
+    : workoutText(fake);
+  const ev = { category: "WORKOUT", type: "Run", start_date_local: k + "T00:00:00", name: "PTC TEST" + (mode === "hr" ? " FC" : "") + " : 3×(1′C/1′M)", description: descr, external_id: ext };
   const r = await iv("POST", `/api/v1/athlete/${id}/events/bulk?upsert=true`, [ev]);
   if (r.status === 401 || r.status === 403) return { status: "intervals_denied", http: r.status };
   if (r.status !== 200) return { status: "intervals_error", http: r.status, detail: (r.raw || "").slice(0, 300) };
