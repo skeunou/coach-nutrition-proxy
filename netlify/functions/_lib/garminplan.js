@@ -45,7 +45,9 @@ function isRun(s) {
 }
 
 /* Texte de séance au format intervals.icu (étapes nommées, cibles en % de la FC max) */
-/* Allures du plan → cibles d'allure Garmin (15 nov. 2026, demande de Laurent : « les consignes d'allure, c'est important »).
+/* Couleurs Garmin : les titres de blocs DOIVENT être « Warmup / Main Set / Cooldown » (mots-clés intervals.icu → type d'étape
+   échauffement rouge / effort bleu / retour vert) ; marche de récup = intensity=rest (gris). Les noms d'étapes restent en français.
+   Allures du plan → cibles d'allure Garmin (15 nov. 2026, demande de Laurent : « les consignes d'allure, c'est important »).
    Format intervals.icu : « - Course 1m 7:34-6:04/km Pace » (lente-rapide). Aucun chiffre dans le nom des étapes :
    intervals lirait « 6:04/km » comme une cible. Les consignes FC / cadence vont dans l'en-tête de la séance.
    ⚠️ Les cibles d'allure n'arrivent sur la montre que si l'allure seuil est réglée dans intervals.icu (Run). */
@@ -78,20 +80,20 @@ function workoutText(s) {
   const run = (min, hr) => "- Course " + min + "m " + (p ? paceTgt(p) : hr);
   let m = /(\d+)\s*×\s*\(\s*(\d+)′C\s*\/\s*(\d+)′M\s*\)/.exec(short);
   if (/fractionn/i.test(lab) && m) {          // Reprise : N × (X′ course / Y′ marche)
-    return header(s, p) + ["Échauffement", "- Marche 5m", "", "Fractionné " + m[1] + "x", run(m[2], "60-78% HR"), "- Marche " + m[3] + "m", "", "Retour au calme", "- Marche 5m"].join("\n");
+    return header(s, p) + ["Warmup", "- Marche 5m", "", "Main Set " + m[1] + "x", run(m[2], "60-78% HR"), "- Marche " + m[3] + "m intensity=rest", "", "Cooldown", "- Marche 5m"].join("\n");
   }
   m = /(\d+)′\s*continu/.exec(short);
   if (/fractionn/i.test(lab) && m) {
-    return header(s, p) + ["Échauffement", "- Marche 5m", "", "Corps", run(m[1], "60-78% HR"), "", "Retour au calme", "- Marche 5m"].join("\n");
+    return header(s, p) + ["Warmup", "- Marche 5m", "", "Main Set", run(m[1], "60-78% HR"), "", "Cooldown", "- Marche 5m"].join("\n");
   }
   const dur = (s.plan && s.plan.durMin) || 0;
   if (/EF continu/i.test(lab) && dur) {       // Réintroduction : EF plat
-    return header(s, p) + ["Échauffement", "- Course 5m Z1 HR", "", "Corps", run(Math.max(5, dur - 10), "Z2 HR"), "", "Retour au calme", "- Course 5m Z1 HR"].join("\n");
+    return header(s, p) + ["Warmup", "- Course 5m Z1 HR", "", "Main Set", run(Math.max(5, dur - 10), "Z2 HR"), "", "Cooldown", "- Course 5m Z1 HR"].join("\n");
   }
   // Qualité, côtes, etc. : pas encore convertis (structure propre à chaque séance) → non envoyés, plutôt que faux.
   if (!/\bEF\b|endurance|footing|sortie longue|r[ée]cup/i.test(lab)) return null;
   const d = dur || 45;                          // Endurance générique : échauffement + corps + retour
-  return header(s, p) + ["Échauffement", "- Course 10m Z1 HR", "", "Corps", run(Math.max(5, d - 15), "Z2 HR"), "", "Retour au calme", "- Course 5m Z1 HR"].join("\n");
+  return header(s, p) + ["Warmup", "- Course 10m Z1 HR", "", "Main Set", run(Math.max(5, d - 15), "Z2 HR"), "", "Cooldown", "- Course 5m Z1 HR"].join("\n");
 }
 
 async function buildEvents() {
