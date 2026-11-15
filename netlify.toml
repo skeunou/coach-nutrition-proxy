@@ -36,3 +36,7 @@
 #   EN SOMMEIL (oct. 2026) — mail « séance du jour » 4h retiré à la demande de Laurent.
 #   (Il plantait depuis l'ajout de raceWin() dans trail-v2 : fonction non extraite par son moteur.)
 #   schedule = "0 2,3 * * *"
+
+[functions."garmin-plan-cron"]
+  # Séances de course du P.P.L → intervals.icu → montre Garmin (7 jours glissants). 15 nov. 2026.
+  schedule = "0 4 * * *"
