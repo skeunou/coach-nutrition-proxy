@@ -62,7 +62,7 @@ function paceOf(s) {
   if (!m) return null;
   const a = sec(m[2]), b = m[3] ? sec(m[3]) : null;
   if (b) return { slow: Math.max(a, b), fast: Math.min(a, b) };
-  if (m[1]) return { slow: a + 90, fast: a };          // « allure ≥ 6′04 » : pas plus vite que 6′04 (marge lente 1′30)
+  if (m[1]) return { slow: a + 30, fast: a };          // « allure ≥ 6′04 » → 6:04-6:34 (fourchette de 30″ demandée par Laurent, 15 nov. 2026)
   return { slow: a + 10, fast: Math.max(0, a - 10) };
 }
 const paceTgt = (p) => mmss(p.slow) + "-" + mmss(p.fast) + "/km Pace";
