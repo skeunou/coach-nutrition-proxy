@@ -108,7 +108,10 @@ async function buildEvents() {
     const s = engine.call((eng) => { eng.setDay(t0); return eng.gen(day) || {}; });
     if (!isRun(s)) continue;
     const desc = workoutText(s); if (!desc) continue;
-    const title = (s.displayTitle || s.label || "Course") + (s.short ? " · " + s.short : "");
+    // Nom demandé par Laurent : « PTC Reprise N : format » pour le protocole de reprise
+    const fm = /fractionn\S*\s+\S+\s*·\s*(\d+)\s*\//i.exec(s.label || "");
+    const title = fm ? "PTC Reprise " + fm[1] + " : " + (s.short || "")
+      : (s.displayTitle || s.label || "Course") + (s.short ? " · " + s.short : "");
     out.push({ category: "WORKOUT", type: "Run", start_date_local: k + "T00:00:00", name: title.slice(0, 80), description: desc, external_id: PREFIX + k });
   }
   return { from: ymdOf(t0), to: ymdOf(new Date(t0.getFullYear(), t0.getMonth(), t0.getDate() + 7)), events: out };
