@@ -45,24 +45,53 @@ function isRun(s) {
 }
 
 /* Texte de séance au format intervals.icu (étapes nommées, cibles en % de la FC max) */
-const WALK = "50-65% HR";
+/* Allures du plan → cibles d'allure Garmin (15 nov. 2026, demande de Laurent : « les consignes d'allure, c'est important »).
+   Format intervals.icu : « - Course 1m 7:34-6:04/km Pace » (lente-rapide). Aucun chiffre dans le nom des étapes :
+   intervals lirait « 6:04/km » comme une cible. Les consignes FC / cadence vont dans l'en-tête de la séance.
+   ⚠️ Les cibles d'allure n'arrivent sur la montre que si l'allure seuil est réglée dans intervals.icu (Run). */
+function sec(x) { const m = /(\d+)[′':](\d{2})/.exec(x); return m ? +m[1] * 60 + +m[2] : null; }
+function mmss(t) { return Math.floor(t / 60) + ":" + String(Math.round(t % 60)).padStart(2, "0"); }
+function planText(s) {
+  return [].concat(s.detail || [], (s._specs || s.specs || []).map((x) => x.join(" "))).map(String).join(" ").replace(/<[^>]+>/g, "");
+}
+/* → { slow, fast } en secondes/km, ou null */
+function paceOf(s) {
+  const m = /allure\s*(≥|>=)?\s*(\d+[′':]\d{2})\s*(?:[–-]\s*(\d+[′':]\d{2}))?\s*\/?\s*km/i.exec(planText(s));
+  if (!m) return null;
+  const a = sec(m[2]), b = m[3] ? sec(m[3]) : null;
+  if (b) return { slow: Math.max(a, b), fast: Math.min(a, b) };
+  if (m[1]) return { slow: a + 90, fast: a };          // « allure ≥ 6′04 » : pas plus vite que 6′04 (marge lente 1′30)
+  return { slow: a + 10, fast: Math.max(0, a - 10) };
+}
+const paceTgt = (p) => mmss(p.slow) + "-" + mmss(p.fast) + "/km Pace";
+function fcOf(s) { const sp = (s._specs || s.specs || []).find((x) => /^FC/i.test(x[0])); return sp ? String(sp[1]).replace(/\s+/g, " ") : ""; }
+function cadOf(s) { const sp = (s._specs || s.specs || []).find((x) => /^Cadence/i.test(x[0])); return sp ? String(sp[1]) : ""; }
+function header(s, p) {
+  const bits = [];
+  if (p) bits.push("Allure " + mmss(p.fast) + " a " + mmss(p.slow) + " par km");
+  const fc = fcOf(s); if (fc) bits.push("FC " + fc);
+  const cad = cadOf(s); if (cad) bits.push("cadence " + cad);
+  return bits.length ? "Consignes : " + bits.join(" · ") + "\n\n" : "";
+}
 function workoutText(s) {
-  const lab = s.label || "", short = s.short || "";
+  const lab = s.label || "", short = s.short || "", p = paceOf(s);
+  const run = (min, hr) => "- Course " + min + "m " + (p ? paceTgt(p) : hr);
   let m = /(\d+)\s*×\s*\(\s*(\d+)′C\s*\/\s*(\d+)′M\s*\)/.exec(short);
-  if (/fractionn/i.test(lab) && m) {          // Reprise : N × (X′ course / Y′ marche), FC < 140
-    return ["Échauffement", "- Marche 5m " + WALK, "", "Fractionné " + m[1] + "x", "- Course " + m[2] + "m 60-78% HR", "- Marche " + m[3] + "m " + WALK, "", "Retour au calme", "- Marche 5m " + WALK].join("\n");
+  if (/fractionn/i.test(lab) && m) {          // Reprise : N × (X′ course / Y′ marche)
+    return header(s, p) + ["Échauffement", "- Marche 5m", "", "Fractionné " + m[1] + "x", run(m[2], "60-78% HR"), "- Marche " + m[3] + "m", "", "Retour au calme", "- Marche 5m"].join("\n");
   }
   m = /(\d+)′\s*continu/.exec(short);
   if (/fractionn/i.test(lab) && m) {
-    return ["Échauffement", "- Marche 5m " + WALK, "", "Corps", "- Course " + m[1] + "m 60-78% HR", "", "Retour au calme", "- Marche 5m " + WALK].join("\n");
+    return header(s, p) + ["Échauffement", "- Marche 5m", "", "Corps", run(m[1], "60-78% HR"), "", "Retour au calme", "- Marche 5m"].join("\n");
   }
   const dur = (s.plan && s.plan.durMin) || 0;
-  if (/EF continu/i.test(lab) && dur) {       // Réintroduction : EF plat, FC 125-143
-    return ["Échauffement", "- Course 5m 60-70% HR", "", "Corps", "- Course " + Math.max(5, dur - 10) + "m 70-80% HR", "", "Retour au calme", "- Course 5m 60-70% HR"].join("\n");
+  if (/EF continu/i.test(lab) && dur) {       // Réintroduction : EF plat
+    return header(s, p) + ["Échauffement", "- Course 5m Z1 HR", "", "Corps", run(Math.max(5, dur - 10), "Z2 HR"), "", "Retour au calme", "- Course 5m Z1 HR"].join("\n");
   }
-  // Générique : échauffement + corps en Z2 + retour (le détail reste dans le P.P.L)
-  const d = dur || 45;
-  return ["Échauffement", "- Course 10m Z1 HR", "", "Corps", "- Course " + Math.max(5, d - 15) + "m Z2 HR", "", "Retour au calme", "- Course 5m Z1 HR"].join("\n");
+  // Qualité, côtes, etc. : pas encore convertis (structure propre à chaque séance) → non envoyés, plutôt que faux.
+  if (!/\bEF\b|endurance|footing|sortie longue|r[ée]cup/i.test(lab)) return null;
+  const d = dur || 45;                          // Endurance générique : échauffement + corps + retour
+  return header(s, p) + ["Échauffement", "- Course 10m Z1 HR", "", "Corps", run(Math.max(5, d - 15), "Z2 HR"), "", "Retour au calme", "- Course 5m Z1 HR"].join("\n");
 }
 
 async function buildEvents() {
@@ -78,8 +107,9 @@ async function buildEvents() {
     const day = new Date(t0.getFullYear(), t0.getMonth(), t0.getDate() + i), k = ymdOf(day);
     const s = engine.call((eng) => { eng.setDay(t0); return eng.gen(day) || {}; });
     if (!isRun(s)) continue;
+    const desc = workoutText(s); if (!desc) continue;
     const title = (s.displayTitle || s.label || "Course") + (s.short ? " · " + s.short : "");
-    out.push({ category: "WORKOUT", type: "Run", start_date_local: k + "T00:00:00", name: title.slice(0, 80), description: workoutText(s), external_id: PREFIX + k });
+    out.push({ category: "WORKOUT", type: "Run", start_date_local: k + "T00:00:00", name: title.slice(0, 80), description: desc, external_id: PREFIX + k });
   }
   return { from: ymdOf(t0), to: ymdOf(new Date(t0.getFullYear(), t0.getMonth(), t0.getDate() + 7)), events: out };
 }
@@ -110,4 +140,4 @@ async function sync(dry) {
   return { status: "ok", from: plan.from, to: plan.to, pushed, removed };
 }
 
-module.exports = { sync, buildEvents, isRun, workoutText };
+module.exports = { sync, buildEvents, isRun, workoutText, paceOf };
