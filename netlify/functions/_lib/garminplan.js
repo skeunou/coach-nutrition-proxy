@@ -38,13 +38,13 @@ function parisToday() { const n = new Date(Date.now() + 3600 * 1000); return new
 
 /* Course à pied ? (le plan mélange H.T, vélo, marche, renfo sous des typeKey proches) */
 function isRun(s) {
-  const t = s.typeKey || "", lab = (s.label || "") + " " + (s.sub || "") + " " + (s.short || "");
+  const t = s.typeKey || "", lab = (s.label || "") + " " + (s.short || "");
   if (!/^(fond|cotes|longue|course)$/.test(t)) return false;
-  if (/home-?trainer|H\.T|v[ée]lo|SFR|marche|tapis marche|rando|natation|repos/i.test(lab) && !/fractionn/i.test(lab)) return false;
+  if (/🏁/.test(s.label || "")) return false;                                   // les courses ne sont pas des séances guidées
+  if (/home-?trainer|H\.T\b|v[ée]lo|SFR|natation|jambes fatigu|rando/i.test(lab)) return false;
   return true;
 }
 
-/* Texte de séance au format intervals.icu (étapes nommées, cibles en % de la FC max) */
 /* Couleurs Garmin : les titres de blocs DOIVENT être « Warmup / Main Set / Cooldown » (mots-clés intervals.icu → type d'étape
    échauffement rouge / effort bleu / retour vert) ; marche de récup = intensity=rest (gris). Les noms d'étapes restent en français.
    Allures du plan → cibles d'allure Garmin (15 nov. 2026, demande de Laurent : « les consignes d'allure, c'est important »).
@@ -58,7 +58,9 @@ function planText(s) {
 }
 /* → { slow, fast } en secondes/km, ou null */
 function paceOf(s) {
-  const m = /allure\s*(≥|>=)?\s*(\d+[′':]\d{2})\s*(?:[–-]\s*(\d+[′':]\d{2}))?\s*\/?\s*km/i.exec(planText(s));
+  const txt = planText(s);
+  const m = /allure\s*(≥|>=)?\s*(\d+[′':]\d{2})\s*(?:[–-]\s*(\d+[′':]\d{2}))?\s*\/?\s*km/i.exec(txt)
+         || /()(\d+[′':]\d{2})\s*[–-]\s*(\d+[′':]\d{2})\s*\/\s*km/i.exec(txt);
   if (!m) return null;
   const a = sec(m[2]), b = m[3] ? sec(m[3]) : null;
   if (b) return { slow: Math.max(a, b), fast: Math.min(a, b) };
@@ -66,12 +68,12 @@ function paceOf(s) {
   return { slow: a + 10, fast: Math.max(0, a - 10) };
 }
 const paceTgt = (p) => mmss(p.slow) + "-" + mmss(p.fast) + "/km Pace";
-function fcOf(s) { const sp = (s._specs || s.specs || []).find((x) => /^FC/i.test(x[0])); return sp ? String(sp[1]).replace(/\s+/g, " ") : ""; }
+function fcOf(s) { const sp = (s._specs || s.specs || []).find((x) => /^FC/i.test(x[0])); if (!sp) return ""; const v = String(sp[1]).replace(/\s+/g, " "); return /max/i.test(sp[0]) && !/[<>≤≥]/.test(v) ? "max " + v : v; }
 function cadOf(s) { const sp = (s._specs || s.specs || []).find((x) => /^Cadence/i.test(x[0])); return sp ? String(sp[1]) : ""; }
-function header(s, p) {
+function header(s, p, noFc) {
   const bits = [];
   if (p) bits.push("Allure " + mmss(p.fast) + " a " + mmss(p.slow) + " par km");
-  const fc = fcOf(s); if (fc) bits.push("FC " + fc);
+  const fc = noFc ? "" : fcOf(s); if (fc) bits.push("FC " + fc);
   const cad = cadOf(s); if (cad) bits.push("cadence " + cad);
   return bits.length ? "Consignes : " + bits.join(" · ") + "\n\n" : "";
 }
@@ -89,6 +91,42 @@ function workoutText(s) {
   const dur = (s.plan && s.plan.durMin) || 0;
   if (/EF continu/i.test(lab) && dur) {       // Réintroduction : EF plat
     return header(s, p) + ["Warmup", "- Course 5m Z1 HR", "", "Main Set", run(Math.max(5, dur - 10), "Z2 HR"), "", "Cooldown", "- Course 5m Z1 HR"].join("\n");
+  }
+  const txt = planText(s);
+  const dstr = (sec2) => (sec2 >= 60 ? Math.floor(sec2 / 60) + "m" : "") + (sec2 % 60 ? (sec2 % 60) + "s" : "");
+  const accel = /acc[ée]l[ée]rations?/i.test(txt) ? ["", "Accélérations 3x", "- Accélération 20s Z4 HR", "- Trot 40s intensity=rest"] : [];
+  // Qualité route/piste : « Corps : N × M′ à A–B/km, récup R »
+  let q = /(\d+)\s*×\s*(\d+)′(\d{2})?\s*à\s*(\d+['′:]\d{2})\s*[–-]\s*(\d+['′:]\d{2})\s*\/km\s*,?\s*r[ée]cup\s*(\d+)\s*(″|′)\s*(\d{2})?/i.exec(txt);
+  if (q) {
+    const eff = +q[2] * 60 + (+q[3] || 0), rec = q[7] === "″" ? +q[6] : +q[6] * 60 + (+q[8] || 0);
+    const pa = sec(q[4]), pb = sec(q[5]);
+    const nm = /VMA/i.test(lab) ? "VMA" : (/sous-seuil/i.test(lab) ? "Sous-seuil" : "Seuil");
+    return header(s, { fast: Math.min(pa, pb), slow: Math.max(pa, pb) }, true) + ["Warmup", "- Échauffement EF 15m Z2 HR"].concat(accel, ["", "Main Set " + q[1] + "x",
+      "- " + nm + " " + dstr(eff) + " " + mmss(Math.max(pa, pb)) + "-" + mmss(Math.min(pa, pb)) + "/km Pace",
+      "- Récup trot " + dstr(rec) + " intensity=rest", "", "Cooldown", "- Retour EF 10m Z1 HR"]).join("\n");
+  }
+  // Côtes club : « N × 1′30 à 2′ en montée … ratio 1:1,5 »
+  q = /(\d+)\s*×\s*(\d+)′(\d{2})?\s*(?:à\s*(\d+)′(\d{2})?)?\s*en mont[ée]e/i.exec(txt);
+  if (q && /c[ôo]tes/i.test(lab)) {
+    const eff = q[4] ? +q[4] * 60 + (+q[5] || 0) : +q[2] * 60 + (+q[3] || 0);
+    const r = /ratio\s*1\s*:\s*(\d+(?:[.,]\d+)?)/i.exec(txt), rec = Math.round(eff * (r ? parseFloat(r[1].replace(",", ".")) : 1.5));
+    return header(s, null) + ["Warmup", "- Échauffement EF 15m Z2 HR"].concat(accel, ["", "Main Set " + q[1] + "x",
+      "- Côte " + dstr(eff) + " Z4 HR", "- Descente trottinée " + dstr(rec) + " intensity=rest", "", "Cooldown", "- Retour EF 10m Z1 HR"]).join("\n");
+  }
+  // Tapis incliné : « Tapis marche 4×5′ », « Tapis 4×8′ · 6 kg », récup à plat
+  q = /tapis[^0-9]*(\d+)\s*×\s*(\d+)′/i.exec(short || "") || /(\d+)\s*×\s*(\d+)′[^.]*tapis|tapis[^.]*?(\d+)\s*×\s*(\d+)′/i.exec(txt);
+  if (q && /tapis/i.test(short + " " + lab + " " + txt)) {
+    const n = q[1] || q[3], m2 = q[2] || q[4];
+    const rr = /r[ée]cup\s*:?\s*(\d+)′/i.exec(txt), rec = rr ? +rr[1] : 2;
+    const lest = /(\d+)\s*kg/i.exec(short || ""), walk = /marche/i.test(short + " " + txt);
+    const eff = walk ? "Marche active en pente" : ("Tapis en pente" + (lest ? " lesté" : ""));
+    const wu = /trot/i.test(txt) ? ["Warmup", "- Marche 10m", "- Trot plat 5m Z1 HR"] : ["Warmup", "- Marche 10m"];
+    return header(s, null) + wu.concat(["", "Main Set " + n + "x", "- " + eff + " " + m2 + "m", "- Récup à plat " + rec + "m intensity=rest", "", "Cooldown", "- Marche 5m"]).join("\n");
+  }
+  // Sortie de réintroduction : « 50′ plat » en Z2 à la FC (terrain varié → la FC, pas l'allure)
+  q = /(\d+)′\s*plat/i.exec(short || "");
+  if (q && /sortie/i.test(lab)) {
+    return header(s, null) + ["Warmup", "- Course 10m Z1 HR", "", "Main Set", "- Course " + Math.max(5, +q[1] - 15) + "m 70-80% HR", "", "Cooldown", "- Course 5m Z1 HR"].join("\n");
   }
   // Qualité, côtes, etc. : pas encore convertis (structure propre à chaque séance) → non envoyés, plutôt que faux.
   if (!/\bEF\b|endurance|footing|sortie longue|r[ée]cup/i.test(lab)) return null;
