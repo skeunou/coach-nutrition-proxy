@@ -38,10 +38,9 @@ function parisToday() { const n = new Date(Date.now() + 3600 * 1000); return new
 
 /* Course à pied ? (le plan mélange H.T, vélo, marche, renfo sous des typeKey proches) */
 function isRun(s) {
-  const t = s.typeKey || "", lab = (s.label || "") + " " + (s.short || "");
+  const t = s.typeKey || "", lab = (s.label || "") + " " + (s.sub || "") + " " + (s.short || "");
   if (!/^(fond|cotes|longue|course)$/.test(t)) return false;
-  if (/🏁/.test(s.label || "")) return false;                                   // les courses ne sont pas des séances guidées
-  if (/home-?trainer|H\.T\b|v[ée]lo|SFR|natation|jambes fatigu|rando/i.test(lab)) return false;
+  if (/home-?trainer|H\.T|v[ée]lo|SFR|natation|repos|pas de c[ôo]tes/i.test(lab)) return false;
   return true;
 }
 
@@ -76,6 +75,21 @@ function header(s, p, noFc) {
   const fc = noFc ? "" : fcOf(s); if (fc) bits.push("FC " + fc);
   const cad = cadOf(s); if (cad) bits.push("cadence " + cad);
   return bits.length ? "Consignes : " + bits.join(" · ") + "\n\n" : "";
+}
+
+/* Côtes de réintroduction (déc. 2026) : « Côtes 6×1′30 · RPE 7 », redescente marche ou trot très lent.
+   Le plan ne chiffre pas la redescente → 2× la durée de la côte (repère). Type non reconnu → null (pas d'envoi). */
+function specialText(s) {
+  const lab = s.label || "", txt = planText(s);
+  const m = /C[ôo]tes\s*(\d+)\s*×\s*(\d+)\s*[′'](\d{1,2})?/i.exec(s.short || s.sub || "");
+  if (/r[ée]introduction/i.test(lab) && m) {
+    const eff = +m[2] * 60 + (+m[3] || 0), rec = eff * 2;
+    const dstr = (x) => (x >= 60 ? Math.floor(x / 60) + "m" : "") + (x % 60 ? (x % 60) + "s" : "");
+    const down = /trot/i.test(txt.replace(/trot plat/gi, "")) ? "Redescente trot très lent" : "Redescente marche";
+    return header(s, null) + ["Warmup", "- Marche 10m", "- Trot plat 5m Z1 HR", "", "Main Set " + m[1] + "x", "- Côte " + dstr(eff) + " Z3 HR", "- " + down + " " + dstr(rec) + " intensity=rest", "", "Cooldown", "- Marche 5m"].join("\n");
+  }
+  if (/qualit|c[ôo]tes|tapis|mont[ée]e/i.test(lab)) return null;
+  return undefined;
 }
 function workoutText(s) {
   const lab = s.label || "", short = s.short || "", p = paceOf(s);
@@ -128,8 +142,9 @@ function workoutText(s) {
   if (q && /sortie/i.test(lab)) {
     return header(s, null) + ["Warmup", "- Course 10m Z1 HR", "", "Main Set", "- Course " + Math.max(5, +q[1] - 15) + "m 70-80% HR", "", "Cooldown", "- Course 5m Z1 HR"].join("\n");
   }
-  // Qualité, côtes, etc. : pas encore convertis (structure propre à chaque séance) → non envoyés, plutôt que faux.
-  if (!/\bEF\b|endurance|footing|sortie longue|r[ée]cup/i.test(lab)) return null;
+  const special = specialText(s); if (special !== undefined) return special;
+  // Endurance (EF, sortie longue, réintroduction plate…) ; tout autre type inconnu → non envoyé plutôt que faux.
+  if (!/\bEF\b|endurance|footing|sortie|r[ée]cup/i.test(lab)) return null;
   const d = dur || 45;                          // Endurance générique : échauffement + corps + retour
   return header(s, p) + ["Warmup", "- Course 10m Z1 HR", "", "Main Set", run(Math.max(5, d - 15), "Z2 HR"), "", "Cooldown", "- Course 5m Z1 HR"].join("\n");
 }
@@ -173,6 +188,21 @@ async function sync(dry) {
       removed.push({ d: e.start_date_local, http: d.status });
     }
   }
+  // 1 bis. Nettoyage du 1er du mois (demande de Laurent, 16 nov. 2026) : on retire de la bibliothèque les séances
+  // ppl- passées, SAUF la semaine qui précède le 1er (pour pouvoir rattraper une séance manquée).
+  const cleaned = [];
+  const today = parisToday();
+  if (today.getDate() === 1) {
+    const lim = new Date(today); lim.setDate(lim.getDate() - 8);          // dernier jour supprimé = 1er − 8 j
+    const ymd = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    const old = await iv("GET", `/api/v1/athlete/${id}/events?oldest=2026-01-01&newest=${ymd(lim)}&category=WORKOUT`);
+    for (const e of Array.isArray(old.json) ? old.json : []) {
+      if (e.external_id && String(e.external_id).startsWith(PREFIX) && String(e.start_date_local).slice(0, 10) <= ymd(lim)) {
+        const d = await iv("DELETE", `/api/v1/athlete/${id}/events/${e.id}`);
+        cleaned.push({ d: String(e.start_date_local).slice(0, 10), http: d.status });
+      }
+    }
+  }
   // 2. Créer / mettre à jour
   let pushed = [];
   if (plan.events.length) {
@@ -180,7 +210,7 @@ async function sync(dry) {
     if (r.status !== 200) return { status: "intervals_error", http: r.status, detail: (r.raw || "").slice(0, 300) };
     pushed = (r.json || []).map((e) => ({ d: (e.start_date_local || "").slice(0, 10), name: e.name, steps: e.workout_doc && e.workout_doc.steps ? e.workout_doc.steps.length : null, min: e.moving_time ? Math.round(e.moving_time / 60) : null }));
   }
-  return { status: "ok", from: plan.from, to: plan.to, pushed, removed };
+  return { status: "ok", from: plan.from, to: plan.to, pushed, removed, cleaned };
 }
 
 /* Séance BIDON pour tester la chaîne P.P.L → intervals.icu → Garmin (15 nov. 2026).
