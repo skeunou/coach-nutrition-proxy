@@ -27,6 +27,13 @@ function gh(method, path, token, bodyObj) {
   });
 }
 
+function newerSwap(a, b) {
+  const ok = (x) => x && typeof x === "object" && x.p && typeof x.p === "object";
+  if (!ok(a)) return ok(b) ? b : undefined;
+  if (!ok(b)) return a;
+  return (a._u || 0) >= (b._u || 0) ? a : b;
+}
+
 function statePath(user) { return "state-" + user + ".json"; }
 
 async function readState(user, token) {
@@ -84,6 +91,8 @@ exports.handler = async (event) => {
         log: Array.isArray(inc.log) ? inc.log : [],
         links: (inc.links && typeof inc.links === "object") ? inc.links : {},
         extras: Array.isArray(inc.extras) ? inc.extras : ((cur.state && cur.state.extras) || []),
+        // 18 nov. 2026 : échanges de séances (P.P.L bêta). Le plus récent (_u) gagne ; la prod ne l'envoie pas → on garde l'existant.
+        swap: newerSwap(inc.swap, cur.state && cur.state.swap),
         rev: ((cur.state && cur.state.rev) || 0) + 1,
         updated: Date.now(),
       };

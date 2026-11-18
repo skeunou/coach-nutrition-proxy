@@ -55,7 +55,13 @@ function buildEngine(html, storage) {
     const decl = [...have.values()].filter((x) => !seen.has(x.pos) && seen.add(x.pos)).sort((a, b) => a.pos - b.pos).map((x) => x.code);
     const code = "var __LS__=" + JSON.stringify(storage || {}) + ";" + PRELUDE + decl.join("\n") +
       `;if(typeof rebuildBlocks==="function")rebuildBlocks();` +
-      `(function(){return{setDay:function(d){today=d;},gen:gen,blockFor:blockFor,` +
+      // 18 nov. 2026 : échanges de séances de l'app (swap:v1 = {p:{jour:"jour source"}}) appliqués ici
+      // → montre Garmin, coach du soir et aperçus voient le même plan que l'app.
+      `function __swGen(d){var o=null;try{o=JSON.parse(localStorage.getItem("swap:v1")||"null");}catch(e){}` +
+      `var k=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");` +
+      `var s=o&&o.p&&o.p[k];if(!s)return gen(d);var q=s.split("-");var g=gen(new Date(+q[0],+q[1]-1,+q[2]));` +
+      `if(g){if(g.linkid)g.linkid="plan:"+k;g._swFrom=s;}return g;}` +
+      `(function(){return{setDay:function(d){today=d;},gen:__swGen,blockFor:blockFor,` +
       `weekTarget:(typeof weekTarget==="function"?weekTarget:null),` +
       `cal:function(){return{blocks:BLOCKS,races:(typeof RACES!=="undefined"?RACES:[]),miles:(typeof REP_MILES!=="undefined"?REP_MILES:{}),j0:(typeof repJ0==="function"?repJ0():null)};}};})()`;
     eng = (0, eval)(code);

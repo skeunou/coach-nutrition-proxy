@@ -331,6 +331,7 @@ exports.handler = async (event) => {
   let appState = null; try { appState = (await ST.readJson("state-laurent.json")).data; } catch (e) {}
   const storage = {};
   if (appState && appState.rep) storage["reprise:v1"] = JSON.stringify(appState.rep);
+  if (appState && appState.swap) storage["swap:v1"] = JSON.stringify(appState.swap); // échanges de séances (18 nov. 2026)
   if (appState && appState.refs) storage["refs:v1"] = JSON.stringify(appState.refs);
   let oldRefs = null; try { oldRefs = (await ST.readJson("coach/refs.json")).data; } catch (e) {}
   if (oldRefs) storage["coach:refs:v1"] = JSON.stringify(oldRefs);

@@ -153,6 +153,7 @@ async function buildEvents() {
   let appState = null; try { appState = (await ST.readJson("state-laurent.json")).data; } catch (e) {}
   const storage = {};
   if (appState && appState.rep) storage["reprise:v1"] = JSON.stringify(appState.rep);
+  if (appState && appState.swap) storage["swap:v1"] = JSON.stringify(appState.swap); // échanges de séances (18 nov. 2026)
   if (appState && appState.refs) storage["refs:v1"] = JSON.stringify(appState.refs);
   const app = await rq({ hostname: APP.host, path: APP.path, method: "GET", headers: { "User-Agent": "lv-garminplan" } });
   if (app.status !== 200) throw new Error("trail-v2.html HTTP " + app.status);
