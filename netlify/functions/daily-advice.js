@@ -48,7 +48,7 @@ exports.handler = async (event) => {
   if (Array.isArray(s.specs) && s.specs.length) L.push("Consignes chiffrées : " + s.specs.slice(0, 8).map((x) => clip(x, 60)).join(" · "));
   if (s.why) L.push("Objectif de la séance : " + clip(s.why, 300));
   if (Array.isArray(s.detail) && s.detail.length) L.push("Déroulé : " + s.detail.slice(0, 8).map((x) => clip(x, 160)).join(" | "));
-  if (b.renfo) L.push("RENFO DU JOUR (file A/B/C, facultatif selon sa journée) : " + clip(b.renfo, 120));
+  if (b.renfo) L.push("RENFO DU JOUR (programme de son kiné Pascal, fait dans l'appli de Pascal ; facultatif selon sa journée — ne pas détailler d'exercices) : " + clip(b.renfo, 120));
   if (b.yesterday) L.push("HIER : " + clip(b.yesterday, 200));
 
   const hdr = { "x-api-key": process.env.ANTHROPIC_API_KEY_NUTRITION || "", "anthropic-version": "2023-06-01" };

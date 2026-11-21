@@ -37,7 +37,7 @@ const PROFILE = [
   "Santé : pubalgie réveillée fin septembre 2026, infiltration (date : voir REPÈRES DATÉS), reprise très progressive (programme Fractionné de La Clinique du Coureur, trépied adducteurs/transverse/fessiers). Règle douleur : ≤ 2/10 pendant ET normale le lendemain matin. Exclus pendant la reprise : sauts, fentes, squat dynamique, hinge lourd, gros braquet/SFR, étirements forcés des adducteurs. Le kiné et le médecin priment.",
   "Zones FC course : Z1 < 125, Z2 125-143, Z3 143-152, Z4 152-162, Z5 > 162. Vélo : ~10 bpm plus bas.",
   "Matériel : barre + disques, haltères 5/10/15 kg, kettlebell 12-24 kg, TRX + barre de traction, banc, box 51/61/76 cm, élastiques, tapis de course (max 15 %), home-trainer avec puissance, vélo de route, bâtons.",
-  "Créneaux habituels : lundi midi EF club, mardi soir côtes club, mercredi variable, jeudi 12h-14h qualité, dimanche sortie longue. Renfo : file A/B/C sans jour fixe, 3×/semaine, 60 min (dont 15′ de bloc pubalgie).",
+  "Créneaux habituels : lundi midi EF club, mardi soir côtes club, mercredi variable, jeudi 12h-14h qualité, dimanche sortie longue. Renfo (depuis le 21 nov. 2026) : programme prescrit par Pascal Tramoni (kiné physio, ultra-traileur), réalisé dans l'appli de Pascal ; Laurent le valide dans le P.P.L (entrées « RENFO PASCAL » : RPE, durée, douleur pubis). Objectif 3×/semaine sans jour fixe. Ne pas proposer de contenu de renfo concurrent : renvoyer vers Pascal pour les exercices et les charges.",
 ].join("\n");
 
 const SYS = [
